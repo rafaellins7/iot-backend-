@@ -69,9 +69,7 @@ iot-backend/
 ## Sobre o schema do banco
 
 A tabela `leituras` criada em `database.py` é um schema inicial só pra
-destravar o desenvolvimento (consigo testar o pipeline completo sem esperar
-o Daniel terminar). Assim que ele fechar o schema definitivo (tabelas de
-leitura, lote etc.), ajustamos `database.py` pra bater com o schema oficial.
+destravar o desenvolvimento.
 
 Colunas atuais de `leituras`:
 | coluna                 | tipo         | descrição                                   |
