@@ -1,4 +1,3 @@
-# Schema provisório até o Daniel fechar o definitivo.
 import psycopg2
 from src import config
 

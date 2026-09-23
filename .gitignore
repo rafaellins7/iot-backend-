@@ -4,6 +4,7 @@ venv/
 
 # Variáveis de ambiente reais (segredo)
 .env
+.env.example
 
 # Python
 __pycache__/
