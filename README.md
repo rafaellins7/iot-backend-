@@ -1,7 +1,6 @@
 # Backend - IoT ThingSpeak -> PostgreSQL
 
-Lê os dados de temperatura/umidade do canal ThingSpeak
-([canal 3500765](https://thingspeak.mathworks.com/channels/3500765)) e grava no PostgreSQL.
+Lê os dados de temperatura/umidade do canal ThingSpeak e grava no PostgreSQL.
 
 ## 1. Criar e ativar o ambiente virtual
 
@@ -28,7 +27,7 @@ cp .env.example .env
 ```
 
 Abra o `.env` e confira:
-- `THINGSPEAK_CHANNEL_ID` já vem preenchido com o canal da Lorena (3500765)
+- `THINGSPEAK_CHANNEL_ID`
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`: dados de conexão do PostgreSQL (local ou o que o Daniel configurar)
 
 Se o banco `iot_db` ainda não existir, crie-o (com o Postgres rodando localmente):
@@ -81,9 +80,3 @@ Colunas atuais de `leituras`:
 | criado_em               | timestamptz  | timestamp de quando o ESP32 enviou            |
 | inserido_em             | timestamptz  | timestamp de quando foi gravado no banco      |
 
-## Testando sem esperar o ESP32
-
-Como o canal 3500765 já existe e é público, dá pra mandar valores manuais
-direto pela interface do ThingSpeak (ou via `curl`/Postman pra API de
-update) e o `backfill_historico.py` / `main.py` já conseguem ler e gravar
-normalmente, sem precisar do sensor real.
