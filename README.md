@@ -28,8 +28,8 @@ cp .env.example .env
 ```
 
 Abra o `.env` e confira:
-- `THINGSPEAK_CHANNEL_ID` já vem preenchido com o canal da Lorena (3500765)
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`: dados de conexão do PostgreSQL (local ou o que o Daniel configurar)
+- `THINGSPEAK_CHANNEL_ID` 
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`: dados de conexão do PostgreSQL 
 
 Se o banco `iot_db` ainda não existir, crie-o (com o Postgres rodando localmente):
 
