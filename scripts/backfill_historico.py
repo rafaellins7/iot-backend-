@@ -3,7 +3,6 @@ from src import thingspeak_client, database
 
 
 def main(quantidade=100):
-    database.criar_tabelas()
     leituras = thingspeak_client.buscar_leituras(quantidade=quantidade)
 
     if not leituras:

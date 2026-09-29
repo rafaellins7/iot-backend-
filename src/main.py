@@ -5,8 +5,7 @@ from src import config, thingspeak_client, database
 
 def main():
     print(f"Conectando no canal ThingSpeak {config.THINGSPEAK_CHANNEL_ID}...")
-    database.criar_tabelas()
-    print("Tabela 'leituras' pronta.")
+    print(f"Gravando em 'leitura_climatica' (sensor_id={config.SENSOR_ID}).")
     print(f"Iniciando polling a cada {config.POLL_INTERVAL_SECONDS}s (Ctrl+C pra parar)\n")
 
     ultimo_entry_id = None

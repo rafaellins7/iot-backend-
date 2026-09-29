@@ -12,32 +12,19 @@ def conectar():
     )
 
 
-def criar_tabelas():
+def inserir_leitura(leitura: dict, sensor_id: int = None):
+    sensor_id = sensor_id or config.SENSOR_ID
     sql = """
-    CREATE TABLE IF NOT EXISTS leituras (
-        id SERIAL PRIMARY KEY,
-        entry_id_thingspeak INTEGER UNIQUE NOT NULL,
-        temperatura REAL,
-        umidade REAL,
-        criado_em TIMESTAMPTZ NOT NULL,
-        inserido_em TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    """
-    with conectar() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-        conn.commit()
-
-
-def inserir_leitura(leitura: dict):
-    sql = """
-    INSERT INTO leituras (entry_id_thingspeak, temperatura, umidade, criado_em)
-    VALUES (%s, %s, %s, %s)
-    ON CONFLICT (entry_id_thingspeak) DO NOTHING;
+    INSERT INTO leitura_climatica
+        (fk_sensor_id_sensor, entry_id_thingspeak, temperatura, umidade,
+         data_hora, data_recebimento, origem)
+    VALUES (%s, %s, %s, %s, %s, now() AT TIME ZONE 'UTC', 'thingspeak')
+    ON CONFLICT (fk_sensor_id_sensor, entry_id_thingspeak) DO NOTHING;
     """
     with conectar() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (
+                sensor_id,
                 leitura["entry_id"],
                 leitura["temperatura"],
                 leitura["umidade"],
@@ -46,4 +33,3 @@ def inserir_leitura(leitura: dict):
             linhas_afetadas = cur.rowcount
         conn.commit()
     return linhas_afetadas > 0
-
