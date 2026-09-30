@@ -9,13 +9,14 @@ def main(quantidade=100):
         print("Nenhuma leitura encontrada no canal ainda.")
         return
 
-    novas = 0
+    contagem = {"gravada": 0, "duplicada": 0, "rejeitada": 0}
     for leitura in leituras:
-        if database.inserir_leitura(leitura):
-            novas += 1
+        contagem[database.processar_leitura(leitura)] += 1
 
-    print(f"Processadas {len(leituras)} leituras do ThingSpeak. "
-          f"{novas} eram novas e foram gravadas no banco.")
+    print(f"Processadas {len(leituras)} leituras do ThingSpeak: "
+          f"{contagem['gravada']} novas gravadas, "
+          f"{contagem['duplicada']} já existiam, "
+          f"{contagem['rejeitada']} rejeitadas (veja a tabela leitura_rejeitada).")
 
 
 if __name__ == "__main__":

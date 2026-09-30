@@ -14,3 +14,9 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 SENSOR_ID = int(os.getenv("SENSOR_ID", "1"))
+
+# Valores fora delas vão para o log de leituras rejeitadas 
+TEMP_MIN_VALIDA = float(os.getenv("TEMP_MIN_VALIDA", "-40"))
+TEMP_MAX_VALIDA = float(os.getenv("TEMP_MAX_VALIDA", "80"))
+UMIDADE_MIN_VALIDA = float(os.getenv("UMIDADE_MIN_VALIDA", "0"))
+UMIDADE_MAX_VALIDA = float(os.getenv("UMIDADE_MAX_VALIDA", "100")) 
