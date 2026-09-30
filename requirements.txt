@@ -1,3 +1,15 @@
+# Serviços e Requisições
 requests==2.32.3
 python-dotenv==1.0.1
+
+# Banco de Dados
 psycopg2-binary==2.9.13
+
+# Framework da API
+fastapi
+uvicorn[standard]
+pydantic[email]
+
+# Segurança e Criptografia
+passlib[bcrypt]
+bcrypt
