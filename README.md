@@ -242,4 +242,4 @@ A API ficará disponível localmente em `http://127.0.0.1:8000`.
 
 ## Licença
 
-Projeto acadêmico desenvolvido para o **ValeSafra**.
+Projeto acadêmico.

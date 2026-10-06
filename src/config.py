@@ -26,3 +26,9 @@ CORS_ORIGINS = [o.strip() for o in os.getenv(
     "CORS_ORIGINS",
     "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
 ).split(",") if o.strip()]
+
+# Valores fora delas vão para o log de leituras rejeitadas 
+TEMP_MIN_VALIDA = float(os.getenv("TEMP_MIN_VALIDA", "-40"))
+TEMP_MAX_VALIDA = float(os.getenv("TEMP_MAX_VALIDA", "80"))
+UMIDADE_MIN_VALIDA = float(os.getenv("UMIDADE_MIN_VALIDA", "0"))
+UMIDADE_MAX_VALIDA = float(os.getenv("UMIDADE_MAX_VALIDA", "100")) 

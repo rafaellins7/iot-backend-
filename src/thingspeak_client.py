@@ -20,10 +20,13 @@ def buscar_ultima_leitura():
         return None
 
     return {
-        "entry_id": dado["entry_id"],
+       "entry_id": dado["entry_id"],
         "created_at": dado["created_at"],
         "temperatura": _float_seguro(dado.get("field1")),
         "umidade": _float_seguro(dado.get("field2")),
+        # valores originais usados no log de leituras rejeitadas
+        "temperatura_bruta": dado.get("field1"),
+        "umidade_bruta": dado.get("field2"),
     }
 
 
@@ -46,6 +49,8 @@ def buscar_leituras(quantidade=100):
             "created_at": feed["created_at"],
             "temperatura": _float_seguro(feed.get("field1")),
             "umidade": _float_seguro(feed.get("field2")),
+            "temperatura_bruta": feed.get("field1"),
+            "umidade_bruta": feed.get("field2"),
         })
     return leituras
 
