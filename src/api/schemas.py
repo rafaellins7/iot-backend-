@@ -95,3 +95,80 @@ class LogAuditoriaOut(BaseModel):
         v = str(v)
         return v[:-3] if v.endswith("/32") else v[:-4] if v.endswith("/128") else v    
     
+class SensorOut(BaseModel):
+        id_sensor: int
+        nome: Optional[str] = None
+        tipo_sensor: Optional[str] = None
+        localizacao: Optional[str] = None
+        channel_id: Optional[int] = None
+        status: Optional[str] = None
+        id_lote: Optional[int] = None
+        ambiente: str
+        # dados da última leitura (ficam None se o sensor ainda não tem leituras)
+        ultima_leitura: Optional[datetime] = None
+        temperatura: Optional[float] = None
+        umidade: Optional[float] = None
+        origem: Optional[str] = None
+
+class AmbienteSensor(str, Enum):
+    ar = "ar"
+    solo = "solo"
+
+
+class StatusSensor(str, Enum):
+    ativo = "ativo"
+    inativo = "inativo"
+
+
+class SensorCreate(BaseModel):
+    nome: str = Field(min_length=1, max_length=150)
+    tipo_sensor: Optional[str] = Field(default=None, max_length=150)
+    localizacao: Optional[str] = Field(default=None, max_length=150)
+    channel_id: Optional[int] = None
+    id_lote: Optional[int] = None
+    ambiente: AmbienteSensor = AmbienteSensor.ar
+    status: StatusSensor = StatusSensor.ativo
+
+
+class SensorUpdate(BaseModel):
+    nome: Optional[str] = Field(default=None, min_length=1, max_length=150)
+    tipo_sensor: Optional[str] = Field(default=None, max_length=150)
+    localizacao: Optional[str] = Field(default=None, max_length=150)
+    channel_id: Optional[int] = None
+    id_lote: Optional[int] = None
+    ambiente: Optional[AmbienteSensor] = None
+    status: Optional[StatusSensor] = None
+
+class EtapaConfig(str, Enum):
+        campo = "campo"
+        armazenamento = "armazenamento"
+        transporte = "transporte"
+
+
+class ConfigParametroOut(BaseModel):
+    id_config: int
+    id_fruta: Optional[int] = None
+    fruta: Optional[str] = None
+    etapa: str
+    temp_min: Optional[float] = None
+    temp_max: Optional[float] = None
+    umidade_min: Optional[float] = None
+    umidade_max: Optional[float] = None
+
+
+class ConfigParametroCreate(BaseModel):
+    id_fruta: int
+    etapa: EtapaConfig
+    temp_min: float = Field(ge=-40, le=80)
+    temp_max: float = Field(ge=-40, le=80)
+    umidade_min: float = Field(ge=0, le=100)
+    umidade_max: float = Field(ge=0, le=100)
+
+
+class ConfigParametroUpdate(BaseModel):
+    id_fruta: Optional[int] = None
+    etapa: Optional[EtapaConfig] = None
+    temp_min: Optional[float] = Field(default=None, ge=-40, le=80)
+    temp_max: Optional[float] = Field(default=None, ge=-40, le=80)
+    umidade_min: Optional[float] = Field(default=None, ge=0, le=100)
+    umidade_max: Optional[float] = Field(default=None, ge=0, le=100)
