@@ -1,4 +1,3 @@
-# carega as configurações do projeto a partir do arquivo .env
 import os
 from dotenv import load_dotenv
 

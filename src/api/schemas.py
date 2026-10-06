@@ -1,8 +1,25 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, PlainSerializer, field_validator
+
+
+def _iso_utc(dt: datetime) -> str:
+    """ISO 8601 com 'Z' (o banco guarda UTC sem fuso)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _origem_api(valor: str) -> str:
+    """Mesmo vocabulario dos endpoints novos: thingspeak -> real; 'simulado' continua."""
+    v = valor.lower()
+    return "real" if v == "thingspeak" else v
+
+
+DataUTC = Annotated[datetime, PlainSerializer(_iso_utc, return_type=str)]
+OrigemAPI = Annotated[str, PlainSerializer(_origem_api, return_type=str)]
 
 class StatusUsuario(str, Enum):
     ativo = "ativo"
@@ -48,16 +65,16 @@ class LeituraOut(BaseModel):
     id_sensor: Optional[int] = None
     temperatura: Optional[float] = None
     umidade: Optional[float] = None
-    data_hora: Optional[datetime] = None
-    data_recebimento: Optional[datetime] = None
-    origem: Optional[str] = None
+    data_hora: Optional[DataUTC] = None
+    data_recebimento: Optional[DataUTC] = None
+    origem: Optional[OrigemAPI] = None
     entry_id_thingspeak: Optional[int] = None
 
 
 class EstatisticasLeituraOut(BaseModel):
     total_leituras: int
-    primeira_leitura: Optional[datetime] = None
-    ultima_leitura: Optional[datetime] = None
+    primeira_leitura: Optional[DataUTC] = None
+    ultima_leitura: Optional[DataUTC] = None
     temperatura_min: Optional[float] = None
     temperatura_max: Optional[float] = None
     temperatura_media: Optional[float] = None
@@ -105,10 +122,10 @@ class SensorOut(BaseModel):
         id_lote: Optional[int] = None
         ambiente: str
         # dados da última leitura (ficam None se o sensor ainda não tem leituras)
-        ultima_leitura: Optional[datetime] = None
+        ultima_leitura: Optional[DataUTC] = None
         temperatura: Optional[float] = None
         umidade: Optional[float] = None
-        origem: Optional[str] = None
+        origem: Optional[OrigemAPI] = None
 
 class AmbienteSensor(str, Enum):
     ar = "ar"
