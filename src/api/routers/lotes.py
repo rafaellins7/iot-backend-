@@ -45,13 +45,13 @@ def criar_lote(lote: LoteCreate, db: Session = Depends(get_db)):
         VALUES (:codigo, :descricao, :data_inicio, :data_fim, :status)
         RETURNING id_lote, codigo, descricao, data_inicio, data_fim, status
     """
-    novo_lote = db.execute(query, lote.dict()).fetchone()
+    novo_lote = db.execute(query, lote.model_dump()).fetchone()
     db.commit()
     return dict(novo_lote._mapping)
 
 @router.patch("/{id_lote}", response_model=LoteResponse)
 def atualizar_lote(id_lote: int, lote_data: LoteUpdate, db: Session = Depends(get_db)):
-    dados = lote_data.dict(exclude_unset=True)
+    dados = lote_data.model_dump(exclude_unset=True)
     if not dados:
         raise HTTPException(status_code=400, detail="Sem dados para atualizar")
 
