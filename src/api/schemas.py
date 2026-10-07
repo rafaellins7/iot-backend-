@@ -6,20 +6,19 @@ from pydantic import BaseModel, EmailStr, Field, PlainSerializer, field_validato
 
 
 def _iso_utc(dt: datetime) -> str:
-    """ISO 8601 com 'Z' (o banco guarda UTC sem fuso)."""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _origem_api(valor: str) -> str:
-    """Mesmo vocabulario dos endpoints novos: thingspeak -> real; 'simulado' continua."""
     v = valor.lower()
     return "real" if v == "thingspeak" else v
 
 
 DataUTC = Annotated[datetime, PlainSerializer(_iso_utc, return_type=str)]
 OrigemAPI = Annotated[str, PlainSerializer(_origem_api, return_type=str)]
+
 
 class StatusUsuario(str, Enum):
     ativo = "ativo"
@@ -59,6 +58,7 @@ class UsuarioUpdate(BaseModel):
 class SenhaUpdate(BaseModel):
     senha_atual: str
     senha_nova: str = Field(min_length=8, max_length=72)
+
 
 class LeituraOut(BaseModel):
     id_leitura: int
@@ -110,22 +110,23 @@ class LogAuditoriaOut(BaseModel):
         if v is None:
             return None
         v = str(v)
-        return v[:-3] if v.endswith("/32") else v[:-4] if v.endswith("/128") else v    
-    
+        return v[:-3] if v.endswith("/32") else v[:-4] if v.endswith("/128") else v
+
+
 class SensorOut(BaseModel):
-        id_sensor: int
-        nome: Optional[str] = None
-        tipo_sensor: Optional[str] = None
-        localizacao: Optional[str] = None
-        channel_id: Optional[int] = None
-        status: Optional[str] = None
-        id_lote: Optional[int] = None
-        ambiente: str
-        # dados da última leitura (ficam None se o sensor ainda não tem leituras)
-        ultima_leitura: Optional[DataUTC] = None
-        temperatura: Optional[float] = None
-        umidade: Optional[float] = None
-        origem: Optional[OrigemAPI] = None
+    id_sensor: int
+    nome: Optional[str] = None
+    tipo_sensor: Optional[str] = None
+    localizacao: Optional[str] = None
+    channel_id: Optional[int] = None
+    status: Optional[str] = None
+    id_lote: Optional[int] = None
+    ambiente: str
+    ultima_leitura: Optional[DataUTC] = None
+    temperatura: Optional[float] = None
+    umidade: Optional[float] = None
+    origem: Optional[OrigemAPI] = None
+
 
 class AmbienteSensor(str, Enum):
     ar = "ar"
@@ -156,10 +157,11 @@ class SensorUpdate(BaseModel):
     ambiente: Optional[AmbienteSensor] = None
     status: Optional[StatusSensor] = None
 
+
 class EtapaConfig(str, Enum):
-        campo = "campo"
-        armazenamento = "armazenamento"
-        transporte = "transporte"
+    campo = "campo"
+    armazenamento = "armazenamento"
+    transporte = "transporte"
 
 
 class ConfigParametroOut(BaseModel):
@@ -189,3 +191,56 @@ class ConfigParametroUpdate(BaseModel):
     temp_max: Optional[float] = Field(default=None, ge=-40, le=80)
     umidade_min: Optional[float] = Field(default=None, ge=0, le=100)
     umidade_max: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class LoteBase(BaseModel):
+    codigo: str
+    descricao: Optional[str] = None
+    data_inicio: datetime
+    data_fim: Optional[datetime] = None
+    status: str = "ATIVO"
+
+
+class LoteCreate(LoteBase):
+    pass
+
+
+class LoteUpdate(BaseModel):
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+    data_inicio: Optional[datetime] = None
+    data_fim: Optional[datetime] = None
+    status: Optional[str] = None
+
+
+class LoteResponse(LoteBase):
+    id_lote: int
+
+    class Config:
+        from_attributes = True
+
+
+class AlertaBase(BaseModel):
+    id_sensor: Optional[int] = None
+    id_lote: Optional[int] = None
+    mensagem: str
+    nivel_severidade: str
+    status: str = "EM ABERTO"
+
+
+class AlertaCreate(AlertaBase):
+    pass
+
+
+class AlertaUpdateStatus(BaseModel):
+    status: str
+    observacao_resolucao: Optional[str] = None
+
+
+class AlertaResponse(AlertaBase):
+    id_alerta: int
+    data_criacao: DataUTC
+    data_resolucao: Optional[DataUTC] = None
+
+    class Config:
+        from_attributes = True

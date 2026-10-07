@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import config
-from src.api.routers import auditoria, clima, config_parametros, leituras, leituras_rejeitadas, perfis, sensores, usuarios, dashboard, sensor_leituras
+from src.api.routers import (alertas, auditoria, clima, config_parametros, dashboard,
+                             leituras, leituras_rejeitadas, lotes, perfis, sensor_leituras, sensores, usuarios)
 
 app = FastAPI(title="API - Dashboard Climático e Logístico")
 
@@ -23,3 +24,5 @@ app.include_router(sensores.router)
 app.include_router(config_parametros.router)
 app.include_router(dashboard.router)
 app.include_router(sensor_leituras.router)
+app.include_router(lotes.router)
+app.include_router(alertas.router)
