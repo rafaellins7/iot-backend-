@@ -1,4 +1,4 @@
-# ValeSafra - Backend
+# Raiz - Backend
 
 Backend e serviço de ingestão IoT do **ValeSafra**, uma plataforma em desenvolvimento para monitoramento agrícola por meio de dados de sensores.
 
