@@ -193,33 +193,6 @@ class ConfigParametroUpdate(BaseModel):
     umidade_max: Optional[float] = Field(default=None, ge=0, le=100)
 
 
-class LoteBase(BaseModel):
-    codigo: str
-    descricao: Optional[str] = None
-    data_inicio: datetime
-    data_fim: Optional[datetime] = None
-    status: str = "ATIVO"
-
-
-class LoteCreate(LoteBase):
-    pass
-
-
-class LoteUpdate(BaseModel):
-    codigo: Optional[str] = None
-    descricao: Optional[str] = None
-    data_inicio: Optional[datetime] = None
-    data_fim: Optional[datetime] = None
-    status: Optional[str] = None
-
-
-class LoteResponse(LoteBase):
-    id_lote: int
-
-    class Config:
-        from_attributes = True
-
-
 class AlertaBase(BaseModel):
     id_sensor: Optional[int] = None
     id_lote: Optional[int] = None

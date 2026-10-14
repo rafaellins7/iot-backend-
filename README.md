@@ -1,6 +1,6 @@
-# ValeSafra - Backend
+# Raiz - Backend
 
-Backend e serviço de ingestão IoT do **ValeSafra**, uma plataforma em desenvolvimento para monitoramento agrícola por meio de dados de sensores.
+Backend e serviço de ingestão IoT do **Raiz**, uma plataforma em desenvolvimento para monitoramento agrícola por meio de dados de sensores.
 
 > **Projeto em desenvolvimento:** este backend está em fase inicial e ainda falta muita coisa a ser feita. Até agora existem apenas a coleta dos dados do ThingSpeak e os endpoints de usuários e perfis. Os demais endpoints, a autenticação completa, o controle de acesso e várias outras funcionalidades ainda serão desenvolvidos. Estrutura, regras de negócio e banco de dados podem mudar a qualquer momento. Este README reflete o estado atual do código e será atualizado conforme o projeto avançar.
 
