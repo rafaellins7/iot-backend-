@@ -217,3 +217,31 @@ class AlertaResponse(AlertaBase):
 
     class Config:
         from_attributes = True
+
+class AlertaPreditivoBase(BaseModel):
+    id_sensor: Optional[int] = None
+    id_lote: Optional[int] = None
+    probabilidade_risco: float = Field(..., ge=0.0, le=1.0)
+    nivel_severidade: str
+    mensagem: str
+    previsao_data_hora: datetime
+    status: str = "EM ABERTO"
+
+
+class AlertaPreditivoCreate(AlertaPreditivoBase):
+    pass
+
+
+class AlertaPreditivoOut(AlertaPreditivoBase):
+    id_alerta_preditivo: int
+    data_geracao: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CorteAlertaPreditivo(BaseModel):
+    nivel: str
+    limiar_min: float
+    limiar_max: float
+    acao_recomendada: str
