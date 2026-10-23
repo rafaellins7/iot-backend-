@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg2.extras import Json, RealDictCursor
 from pydantic import BaseModel
 
-from src.api import previsao_regras as regras
+from src.api.routers import previsao_regras as regras
 from src.api.auditoria import auditar
 from src.api.deps import get_conn
 from src.api.routers import clima
