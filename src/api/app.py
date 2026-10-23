@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import config
-from src.api.routers import (alertas, auditoria, clima, config_parametros, dados_mercado,
+from src.api.routers import (alertas, alertas_preditivos, auditoria, clima, config_parametros, dados_mercado,
                              dashboard, frutas, leituras, leituras_rejeitadas, lotes, perfis,
                              previsoes, relatorios, relatorios_gerados, sensor_leituras,
                              sensores, usuarios, viagens, risco)
@@ -32,6 +32,7 @@ app.include_router(dashboard.router)
 app.include_router(sensor_leituras.router)
 app.include_router(lotes.router)
 app.include_router(alertas.router)
+app.include_router(alertas_preditivos.router)
 app.include_router(frutas.router)
 app.include_router(dados_mercado.router)
 app.include_router(relatorios.router)
