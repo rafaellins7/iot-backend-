@@ -12,3 +12,6 @@ pydantic[email]
 
 # Segurança e Criptografia
 bcrypt
+
+#Testes
+pytest

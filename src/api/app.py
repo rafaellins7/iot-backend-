@@ -5,7 +5,7 @@ from src import config
 from src.api.routers import (alertas, auditoria, clima, config_parametros, dados_mercado,
                              dashboard, frutas, leituras, leituras_rejeitadas, lotes, perfis,
                              previsoes, relatorios, relatorios_gerados, sensor_leituras,
-                             sensores, usuarios, viagens, risco)
+                             sensores, usuarios, viagens, risco, alertas_preditivos, ia, recomendacoes, previsoes_ia)
 
 app = FastAPI(title="API - Dashboard Climático e Logístico")
 
@@ -39,3 +39,7 @@ app.include_router(relatorios_gerados.router)
 app.include_router(viagens.router)
 app.include_router(risco.router)
 app.include_router(previsoes.router)
+app.include_router(alertas_preditivos.router)
+app.include_router(ia.router)
+app.include_router(recomendacoes.router)
+app.include_router(previsoes_ia.router)

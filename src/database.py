@@ -69,3 +69,15 @@ def processar_leitura(leitura: dict, sensor_id: int = None) -> str:
         registrar_leitura_rejeitada(leitura, "; ".join(motivos), sensor_id)
         return "rejeitada"
     return "gravada" if inserir_leitura(leitura, sensor_id) else "duplicada"
+
+import inspect
+
+
+def get_db():
+    """Compatibilidade: reaproveita a conexão do get_conn (src.api.deps)."""
+    from src.api.deps import get_conn 
+    resultado = get_conn()
+    if inspect.isgenerator(resultado):
+        yield from resultado
+    else:
+        yield resultado
