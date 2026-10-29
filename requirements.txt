@@ -12,6 +12,8 @@ pydantic[email]
 
 # Segurança e Criptografia
 bcrypt
+argon2-cffi
+pyjwt
 
 #Testes
 pytest
