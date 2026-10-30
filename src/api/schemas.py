@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Annotated, Optional
-
+from typing import List
 from pydantic import BaseModel, EmailStr, Field, PlainSerializer, field_validator
 
 
@@ -245,3 +245,17 @@ class CorteAlertaPreditivo(BaseModel):
     limiar_min: float
     limiar_max: float
     acao_recomendada: str
+    
+class ParecerEstruturadoSchema(BaseModel):
+    parecer_agronomico: str = Field(..., description="Análise agronômica do estado do lote, VPD, ETc e prejuízo")
+    parecer_fisiologico: str = Field(..., description="Análise do estresse hídrico/térmico e fisiologia vegetal")
+    recomendacoes: List[str] = Field(..., description="Lista de ações recomendadas")
+    nivel_confianca: str = Field(..., description="Confiança: ALTO, MEDIO ou BAIXO")
+    limitacoes: List[str] = Field(..., description="Ressalvas e indicação de dados simulados")
+
+class ParecerIAResponse(BaseModel):
+    id_lote: int
+    modelo: str
+    origem: str  # 'CACHE', 'GEMINI' ou 'FALLBACK_TEMPLATE'
+    conteudo: ParecerEstruturadoSchema
+    data_geracao: datetime    
