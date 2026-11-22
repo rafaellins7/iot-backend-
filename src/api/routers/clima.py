@@ -14,7 +14,7 @@ _cache: dict = {}
 
 @router.get("/previsao")
 def previsao(
-    dias: int = Query(3, ge=1, le=7),
+    dias: int = Query(7, ge=1, le=14),
     latitude: Optional[float] = Query(None, ge=-90, le=90),
     longitude: Optional[float] = Query(None, ge=-180, le=180),
 ):

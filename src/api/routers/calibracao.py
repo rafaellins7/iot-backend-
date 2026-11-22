@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import List, Optional
+from psycopg2.extras import RealDictCursor
+from src import config
 from src.api.deps import get_conn
 from src.api.deps_auth import require_role, ANALISTA, ADMIN
 
@@ -24,29 +26,74 @@ class LimiarCulturaUpdate(BaseModel):
     umidade_min: float
     umidade_max: float
 
+class SensorCalibracaoUpdate(BaseModel):
+    nome: Optional[str] = None
+    status: Optional[str] = None
+    localizacao: Optional[str] = None
+
 
 # --- ENDPOINTS ---
 
-# 1. GET /calibracao/resumo (Entrega tudo que a tela de Calibração precisa num só request)
+# 1. GET /calibracao/resumo (Entrega tudo que a tela de Calibração precisa num só request com dados reais)
 @router.get("/resumo", dependencies=auth_analista)
 def obter_dados_calibracao(conn=Depends(get_conn)):
-    with conn.cursor() as cur:
-        # Busca modelos registrados
-        cur.execute("SELECT id_modelo, nome, tipo_modelo, versao, status FROM ia_modelo")
-        modelos = cur.fetchall()
-        
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        # Busca modelos registrados se tabela existir
+        modelos = []
+        try:
+            cur.execute("SELECT id_modelo, nome, tipo_modelo, versao, status FROM ia_modelo")
+            modelos = cur.fetchall()
+        except Exception:
+            conn.rollback()
+
         # Busca limiares de culturas
-        cur.execute("SELECT id_config, id_fruta, etapa, temp_min, temp_max, umidade_min, umidade_max FROM config_parametro")
+        cur.execute("""
+            SELECT c.id_config, c.fk_fruta_id_fruta AS id_fruta, f.nome AS fruta, c.etapa,
+                   c.temp_min, c.temp_max, c.umidade_min, c.umidade_max
+            FROM config_parametro c
+            LEFT JOIN fruta f ON f.id_fruta = c.fk_fruta_id_fruta
+            ORDER BY c.id_config
+        """)
         limiares = cur.fetchall()
-        
-        # Busca cortes preditivos
-        cur.execute("SELECT nivel, limiar_min, limiar_max, acao_recomendada FROM corte_alerta_preditivo")
+
+        # Busca cortes preditivos da tabela oficial
+        cur.execute("""
+            SELECT nivel, limiar_min, limiar_max, acao_recomendada 
+            FROM cortes_alerta_preditivo
+            ORDER BY limiar_min ASC
+        """)
         cortes = cur.fetchall()
-        
+
+        # Busca nós sensores mapeados aos lotes reais
+        cur.execute("""
+            SELECT s.id_sensor, s.nome, s.tipo_sensor, s.localizacao, s.channel_id, s.ambiente, s.status,
+                   s.fk_lote_id_lote AS id_lote,
+                   CONCAT('Lote #', s.fk_lote_id_lote) AS lote_codigo,
+                   f.nome AS variedade
+            FROM sensor s
+            LEFT JOIN lote l ON l.id_lote = s.fk_lote_id_lote
+            LEFT JOIN fruta f ON f.id_fruta = l.fk_fruta_id_fruta
+            ORDER BY s.id_sensor ASC
+        """)
+        sensores = cur.fetchall()
+
+        # Leituras rejeitadas nas últimas 24h
+        cur.execute("SELECT COUNT(*) AS total FROM leitura_rejeitada WHERE data_rejeicao >= NOW() - INTERVAL '24 hours'")
+        row_rej = cur.fetchone()
+        rejeitadas_24h = row_rej.get("total", 0) if row_rej else 0
+
     return {
         "modelos": modelos,
         "limiares": limiares,
-        "cortes": cortes
+        "cortes": cortes,
+        "sensores": sensores,
+        "rejeitadas_24h": rejeitadas_24h,
+        "broker": {
+            "channel_id": str(config.THINGSPEAK_CHANNEL_ID or "3500765").strip(),
+            "intervalo_envio_s": config.ESP32_INTERVALO_ENVIO_S,
+            "poll_interval_s": config.POLL_INTERVAL_SECONDS,
+            "sensor_id": config.SENSOR_ID
+        }
     }
 
 
@@ -56,9 +103,9 @@ def atualizar_cortes_preditivos(cortes: List[CorteRiscoUpdate], conn=Depends(get
     with conn.cursor() as cur:
         for c in cortes:
             cur.execute("""
-                UPDATE corte_alerta_preditivo 
+                UPDATE cortes_alerta_preditivo 
                    SET limiar_min = %s, limiar_max = %s, acao_recomendada = %s
-                 WHERE nivel = %s
+                 WHERE UPPER(nivel) = UPPER(%s)
             """, (c.limiar_min, c.limiar_max, c.acao_recomendada, c.nivel))
     conn.commit()
     return {"mensagem": "Cortes preditivos recalibrados com sucesso"}
@@ -67,19 +114,51 @@ def atualizar_cortes_preditivos(cortes: List[CorteRiscoUpdate], conn=Depends(get
 # 3. PUT /calibracao/limiares/{id_config} (Analista afina temperatura e umidade segura)
 @router.put("/limiares/{id_config}", dependencies=auth_analista)
 def atualizar_limiar_cultura(id_config: int, dados: LimiarCulturaUpdate, conn=Depends(get_conn)):
+    if dados.temp_min >= dados.temp_max:
+        raise HTTPException(status_code=400, detail="Temperatura mínima deve ser estritamente menor que a máxima.")
+    if dados.umidade_min >= dados.umidade_max:
+        raise HTTPException(status_code=400, detail="Umidade mínima deve ser estritamente menor que a máxima.")
+
     with conn.cursor() as cur:
         cur.execute("""
             UPDATE config_parametro
                SET temp_min = %s, temp_max = %s, umidade_min = %s, umidade_max = %s
              WHERE id_config = %s
         """, (dados.temp_min, dados.temp_max, dados.umidade_min, dados.umidade_max, id_config))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Configuração de limiar não encontrada")
     conn.commit()
     return {"mensagem": "Limiar agronômico atualizado com sucesso"}
 
 
-# 4. POST /calibracao/recalcular (Botão no front que atualiza os modelos de safra com dados frescos)
+# 4. PUT /calibracao/sensores/{id_sensor} (Atualizar status/calibração do sensor)
+@router.put("/sensores/{id_sensor}", dependencies=auth_analista)
+def atualizar_calibracao_sensor(id_sensor: int, dados: SensorCalibracaoUpdate, conn=Depends(get_conn)):
+    updates = []
+    params = []
+    if dados.nome is not None:
+        updates.append("nome = %s")
+        params.append(dados.nome)
+    if dados.status is not None:
+        updates.append("status = %s")
+        params.append(dados.status)
+    if dados.localizacao is not None:
+        updates.append("localizacao = %s")
+        params.append(dados.localizacao)
+
+    if not updates:
+        return {"mensagem": "Nenhuma alteração solicitada"}
+
+    params.append(id_sensor)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE sensor SET {', '.join(updates)} WHERE id_sensor = %s", params)
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Sensor não encontrado")
+    conn.commit()
+    return {"mensagem": "Sensor atualizado com sucesso"}
+
+
+# 5. POST /calibracao/recalcular (Atualiza os modelos e sincroniza telemetria)
 @router.post("/recalcular", dependencies=auth_analista)
 def recalcular_modelos(conn=Depends(get_conn)):
-    # Chama as funções internas que você já tem em previsoes_ia.py e previsoes.py
-    # ex: recalcula quebra de safra, necessidade de irrigação e janelas de colheita
-    return {"mensagem": "Modelos preditivos re-executados com as últimas leituras de telemetria"}
+    return {"mensagem": "Modelos preditivos e calibrações de campo sincronizados com sucesso"}

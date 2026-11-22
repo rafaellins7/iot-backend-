@@ -7,7 +7,7 @@ from src.api.deps_auth import (ADMIN, ANALISTA, PRODUTOR_EXPORTADOR, get_current
 from src.api.routers import (alertas, alertas_preditivos, analista, central_alertas, auditoria, auth,
                              catalogo, clima, config_parametros, dados_mercado,
                              dashboard, frutas, ia, leituras, leituras_rejeitadas, lotes,
-                             perfis, previsoes, previsoes_ia, recomendacoes, relatorios,
+                             perfis, previsoes, previsoes_ia, recomendacoes, rede, relatorios,
                              relatorios_gerados, risco, sensor_leituras, sensores,
                              usuarios, pareceres, notificacoes, parecer_ia, dashboard_stream, calibracao)
 
@@ -61,12 +61,13 @@ for r in (perfis, usuarios):
     app.include_router(r.router, dependencies=admin)
 
 for r in (leituras, leituras_rejeitadas, sensor_leituras, dashboard, clima, lotes, frutas,
-          risco, previsoes, parecer_ia):
+          risco, previsoes, parecer_ia, ia):
     app.include_router(r.router, dependencies=consulta)
 
 # resumos agregados (sem filtro por dono): só Analista/Admin
 app.include_router(analista.router, dependencies=so_analista)
 app.include_router(calibracao.router, dependencies=analista_edita)
+app.include_router(rede.router)
 
 for r in (sensores, config_parametros, alertas, alertas_preditivos, catalogo,
           relatorios, pareceres, central_alertas):
@@ -75,7 +76,7 @@ for r in (sensores, config_parametros, alertas, alertas_preditivos, catalogo,
 # relatórios gerados/exportados cobrem todos os donos: Analista consulta e gera; Produtor fora
 app.include_router(relatorios_gerados.router, dependencies=analista_so_ae)
 
-for r in (dados_mercado, ia, recomendacoes, previsoes_ia):
+for r in (dados_mercado, recomendacoes, previsoes_ia):
     app.include_router(r.router, dependencies=so_produtor)
 
 # log de acesso (IPs, ações de todos os usuários): só Administrador
