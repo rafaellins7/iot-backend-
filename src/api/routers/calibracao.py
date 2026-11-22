@@ -30,6 +30,7 @@ class SensorCalibracaoUpdate(BaseModel):
     nome: Optional[str] = None
     status: Optional[str] = None
     localizacao: Optional[str] = None
+    fk_lote_id_lote: Optional[int] = None
 
 
 # --- ENDPOINTS ---
@@ -82,12 +83,26 @@ def obter_dados_calibracao(conn=Depends(get_conn)):
         row_rej = cur.fetchone()
         rejeitadas_24h = row_rej.get("total", 0) if row_rej else 0
 
+        # Última leitura climática real recebida no banco (sem valores fictícios)
+        cur.execute("""
+            SELECT entry_id_thingspeak, data_hora, data_recebimento, temperatura, umidade, umidade_solo
+            FROM leitura_climatica
+            ORDER BY data_hora DESC LIMIT 1
+        """)
+        ultima_leitura = cur.fetchone()
+
+        # Lista de lotes reais para mapeamento físico do sensor
+        cur.execute("SELECT id_lote, CONCAT('Lote #', id_lote) AS codigo FROM lote ORDER BY id_lote")
+        lotes_disponiveis = cur.fetchall()
+
     return {
         "modelos": modelos,
         "limiares": limiares,
         "cortes": cortes,
         "sensores": sensores,
         "rejeitadas_24h": rejeitadas_24h,
+        "ultima_leitura": ultima_leitura,
+        "lotes_disponiveis": lotes_disponiveis,
         "broker": {
             "channel_id": str(config.THINGSPEAK_CHANNEL_ID or "3500765").strip(),
             "intervalo_envio_s": config.ESP32_INTERVALO_ENVIO_S,
@@ -131,7 +146,7 @@ def atualizar_limiar_cultura(id_config: int, dados: LimiarCulturaUpdate, conn=De
     return {"mensagem": "Limiar agronômico atualizado com sucesso"}
 
 
-# 4. PUT /calibracao/sensores/{id_sensor} (Atualizar status/calibração do sensor)
+# 4. PUT /calibracao/sensores/{id_sensor} (Atualizar status/vínculo do sensor)
 @router.put("/sensores/{id_sensor}", dependencies=auth_analista)
 def atualizar_calibracao_sensor(id_sensor: int, dados: SensorCalibracaoUpdate, conn=Depends(get_conn)):
     updates = []
@@ -145,6 +160,9 @@ def atualizar_calibracao_sensor(id_sensor: int, dados: SensorCalibracaoUpdate, c
     if dados.localizacao is not None:
         updates.append("localizacao = %s")
         params.append(dados.localizacao)
+    if dados.fk_lote_id_lote is not None:
+        updates.append("fk_lote_id_lote = %s")
+        params.append(dados.fk_lote_id_lote)
 
     if not updates:
         return {"mensagem": "Nenhuma alteração solicitada"}
@@ -155,10 +173,15 @@ def atualizar_calibracao_sensor(id_sensor: int, dados: SensorCalibracaoUpdate, c
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Sensor não encontrado")
     conn.commit()
-    return {"mensagem": "Sensor atualizado com sucesso"}
+    return {"mensagem": "Sensor atualizado com sucesso no PostgreSQL"}
 
 
-# 5. POST /calibracao/recalcular (Atualiza os modelos e sincroniza telemetria)
+# 5. POST /calibracao/recalcular (Re-executa pipeline real de alertas preditivos sobre os cortes)
 @router.post("/recalcular", dependencies=auth_analista)
 def recalcular_modelos(conn=Depends(get_conn)):
-    return {"mensagem": "Modelos preditivos e calibrações de campo sincronizados com sucesso"}
+    from src.agendador import gerar_alertas_preditivos
+    detalhes = gerar_alertas_preditivos(conn)
+    return {
+        "mensagem": "Inferência de risco preditivo recalculada com sucesso!",
+        "detalhes": detalhes
+    }
