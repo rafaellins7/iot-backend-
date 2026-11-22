@@ -24,6 +24,7 @@ class StatusUsuario(str, Enum):
     ativo = "ativo"
     inativo = "inativo"
     pendente = "pendente"
+    bloqueado = "bloqueado"
 
 class PerfilOut(BaseModel):
     id_perfil: int
@@ -44,14 +45,16 @@ class UsuarioOut(BaseModel):
 class UsuarioCreate(BaseModel):
     nome: str = Field(min_length=1, max_length=150)
     email: EmailStr
-    senha: str = Field(min_length=8, max_length=72)
-    id_perfil: int
+    senha: Optional[str] = Field(default=None, min_length=8, max_length=72)
+    id_perfil: Optional[int] = None
+    fk_perfil_id_perfil: Optional[int] = None
 
 
 class UsuarioUpdate(BaseModel):
     nome: Optional[str] = Field(default=None, min_length=1, max_length=150)
     email: Optional[EmailStr] = None
     id_perfil: Optional[int] = None
+    fk_perfil_id_perfil: Optional[int] = None
     status: Optional[StatusUsuario] = None
 
 
@@ -123,6 +126,7 @@ class SensorOut(BaseModel):
     channel_id: Optional[int] = None
     status: Optional[str] = None
     id_lote: Optional[int] = None
+    id_usuario: Optional[int] = None
     ambiente: str
     ultima_leitura: Optional[DataUTC] = None
     temperatura: Optional[float] = None
@@ -148,6 +152,8 @@ class SensorCreate(BaseModel):
     localizacao: Optional[str] = Field(default=None, max_length=150)
     channel_id: Optional[int] = None
     id_lote: Optional[int] = None
+    id_usuario: Optional[int] = None
+    fk_usuario_id_usuario: Optional[int] = None
     ambiente: AmbienteSensor = AmbienteSensor.ar
     status: StatusSensor = StatusSensor.ativo
 
@@ -158,6 +164,8 @@ class SensorUpdate(BaseModel):
     localizacao: Optional[str] = Field(default=None, max_length=150)
     channel_id: Optional[int] = None
     id_lote: Optional[int] = None
+    id_usuario: Optional[int] = None
+    fk_usuario_id_usuario: Optional[int] = None
     ambiente: Optional[AmbienteSensor] = None
     status: Optional[StatusSensor] = None
 

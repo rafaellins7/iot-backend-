@@ -26,6 +26,8 @@ class LoteCreate(BaseModel):
     status: StatusLote = "Em produção"
     destino: Optional[str] = Field(default=None, max_length=150)
     data_colheita: Optional[date] = None
+    id_usuario: Optional[int] = None
+    fk_usuario_id_usuario: Optional[int] = None
 
 
 class LoteUpdate(BaseModel):
@@ -35,6 +37,8 @@ class LoteUpdate(BaseModel):
     status: Optional[StatusLote] = None
     destino: Optional[str] = Field(default=None, max_length=150)
     data_colheita: Optional[date] = None
+    id_usuario: Optional[int] = None
+    fk_usuario_id_usuario: Optional[int] = None
 
 
 class LoteOut(BaseModel):
@@ -47,13 +51,14 @@ class LoteOut(BaseModel):
     etapa: Optional[str] = None  # campo / armazenamento / transporte (fn_etapa_lote)
     destino: Optional[str] = None
     data_colheita: Optional[date] = None
+    id_usuario: Optional[int] = None
 
 
 SELECT_BASE = """
     SELECT l.id_lote, l.fk_fruta_id_fruta AS id_fruta, f.nome AS fruta,
            l.quantidade, l.unidade, l.status::text AS status,
            fn_etapa_lote(l.status) AS etapa,
-           l.destino, l.data_colheita
+           l.destino, l.data_colheita, l.fk_usuario_id_usuario AS id_usuario
     FROM lote l
     LEFT JOIN fruta f ON f.id_fruta = l.fk_fruta_id_fruta
 """
@@ -65,6 +70,8 @@ COLUNAS_EDITAVEIS = {
     "status": "status",
     "destino": "destino",
     "data_colheita": "data_colheita",
+    "id_usuario": "fk_usuario_id_usuario",
+    "fk_usuario_id_usuario": "fk_usuario_id_usuario",
 }
 
 
@@ -119,15 +126,16 @@ def criar_lote(dados: LoteCreate, request: Request, conn=Depends(get_conn)):
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if not _fruta_existe(cur, dados.id_fruta):
                 raise HTTPException(status_code=404, detail="Fruta não encontrada")
+            dono_id = dados.id_usuario if dados.id_usuario is not None else dados.fk_usuario_id_usuario
             cur.execute(
                 """
                 INSERT INTO lote (fk_fruta_id_fruta, quantidade, unidade, status,
-                                  destino, data_colheita)
-                VALUES (%s, %s, %s, %s::status_lote, %s, %s)
+                                  destino, data_colheita, fk_usuario_id_usuario)
+                VALUES (%s, %s, %s, %s::status_lote, %s, %s, %s)
                 RETURNING id_lote
                 """,
                 (dados.id_fruta, dados.quantidade, dados.unidade, dados.status,
-                 dados.destino, dados.data_colheita),
+                 dados.destino, dados.data_colheita, dono_id),
             )
             id_novo = cur.fetchone()["id_lote"]
             ctx.detalhe = f"id={id_novo}"

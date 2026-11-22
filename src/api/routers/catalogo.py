@@ -38,6 +38,85 @@ def listar_propriedades(conn=Depends(get_conn)):
     return linhas
 
 
+class PropriedadeUpdate(BaseModel):
+    nome: Optional[str] = Field(default=None, min_length=1, max_length=150)
+    cidade: Optional[str] = Field(default=None, max_length=80)
+    uf: Optional[str] = Field(default=None, min_length=2, max_length=2)
+    setor: Optional[str] = Field(default=None, max_length=40)
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+    area_ha: Optional[float] = Field(default=None, ge=0)
+    tipo_solo: Optional[str] = Field(default=None, max_length=150)
+    moeda_exibicao: Optional[str] = Field(default=None, min_length=3, max_length=3)
+
+
+class SafraCreate(BaseModel):
+    nome: str = Field(min_length=3, max_length=20)
+    data_inicio: date
+    data_fim: Optional[date] = None
+    meta_ton_ha: Optional[float] = Field(default=None, ge=0)
+
+
+@router.put("/propriedades/{id_propriedade}")
+def atualizar_propriedade(
+    id_propriedade: int, dados: PropriedadeUpdate, request: Request, conn=Depends(get_conn)
+):
+    campos = dados.model_dump(exclude_unset=True)
+    if not campos:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhum campo para atualizar")
+    with auditar(request, "atualizar_propriedade") as ctx:
+        ctx.detalhe = f"id={id_propriedade} campos={','.join(sorted(campos))}"
+        sets = [f"{k} = %s" for k in campos]
+        params = list(campos.values()) + [id_propriedade]
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                UPDATE propriedade SET {', '.join(sets)}
+                 WHERE id_propriedade = %s
+                RETURNING id_propriedade, nome, codigo, cidade, uf, setor,
+                          latitude, longitude, area_ha, tipo_solo, moeda_exibicao
+                """,
+                params,
+            )
+            r = cur.fetchone()
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Propriedade não encontrada")
+        conn.commit()
+    for k in ("latitude", "longitude", "area_ha"):
+        r[k] = _f(r[k])
+    return r
+
+
+@router.post("/safras", status_code=201)
+def criar_safra(dados: SafraCreate, request: Request, conn=Depends(get_conn)):
+    if dados.data_fim is not None and dados.data_fim < dados.data_inicio:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "data_fim deve ser maior ou igual a data_inicio",
+        )
+    with auditar(request, "criar_safra") as ctx:
+        ctx.detalhe = f"nome={dados.nome}"
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO safra (nome, data_inicio, data_fim, meta_ton_ha)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (nome) DO UPDATE
+                   SET data_inicio = EXCLUDED.data_inicio,
+                       data_fim = EXCLUDED.data_fim,
+                       meta_ton_ha = EXCLUDED.meta_ton_ha
+                RETURNING id_safra, nome, data_inicio, data_fim, meta_ton_ha
+                """,
+                (dados.nome, dados.data_inicio, dados.data_fim, dados.meta_ton_ha),
+            )
+            r = cur.fetchone()
+        conn.commit()
+    r["meta_ton_ha"] = _f(r["meta_ton_ha"])
+    hoje = date.today()
+    r["ativa"] = r["data_inicio"] <= hoje and (r["data_fim"] is None or r["data_fim"] >= hoje)
+    return r
+
+
 @router.get("/safras")
 def listar_safras(conn=Depends(get_conn)):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:

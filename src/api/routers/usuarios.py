@@ -84,7 +84,8 @@ def criar_usuario(dados: UsuarioCreate, request: Request, background: Background
         else:
             status_ini, senha_hash, trocar = "pendente", hash_senha(secrets.token_urlsafe(32)), False
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            if not _perfil_existe(cur, dados.id_perfil):
+            perfil_id = dados.id_perfil or dados.fk_perfil_id_perfil or 1
+            if not _perfil_existe(cur, perfil_id):
                 raise HTTPException(status_code=400, detail="Perfil inexistente")
             if _email_em_uso(cur, email):
                 raise HTTPException(status_code=409, detail="E-mail já cadastrado")
@@ -96,7 +97,7 @@ def criar_usuario(dados: UsuarioCreate, request: Request, background: Background
                     VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s, CASE WHEN %s THEN now() END)
                     RETURNING id_usuario
                     """,
-                    (dados.nome, email, senha_hash, status_ini, dados.id_perfil, trocar, status_ini == "ativo"),
+                    (dados.nome, email, senha_hash, status_ini, perfil_id, trocar, status_ini == "ativo"),
                 )
             except errors.UniqueViolation:
                 raise HTTPException(status_code=409, detail="E-mail já cadastrado")
@@ -124,26 +125,31 @@ def editar_usuario(id_usuario: int, dados: UsuarioUpdate, request: Request, conn
             atual = _ou_404(_buscar_usuario(cur, id_usuario))
 
             sets, params = [], []
-            if "nome" in campos:
+            if "nome" in campos and campos["nome"]:
                 sets.append("nome = %s")
                 params.append(campos["nome"])
-            if "email" in campos:
+            if "email" in campos and campos["email"]:
                 email = campos["email"].lower()
                 if _email_em_uso(cur, email, ignorar_id=id_usuario):
                     raise HTTPException(status_code=409, detail="E-mail já cadastrado")
                 sets.append("email = %s")
                 params.append(email)
-            if "id_perfil" in campos:
-                if not _perfil_existe(cur, campos["id_perfil"]):
+            id_perfil = campos.get("id_perfil") or campos.get("fk_perfil_id_perfil")
+            if id_perfil is not None:
+                if not _perfil_existe(cur, id_perfil):
                     raise HTTPException(status_code=400, detail="Perfil inexistente")
                 sets.append("fk_perfil_id_perfil = %s")
-                params.append(campos["id_perfil"])
-            if "status" in campos:
-                novo = campos["status"].value
-            if novo == "pendente" or (novo == "ativo" and atual["status"] == "pendente"):
-                raise HTTPException(status_code=400, detail="Usuário pendente só é ativado pelo código de ativação")
+                params.append(id_perfil)
+            if "status" in campos and campos["status"] is not None:
+                novo = campos["status"]
+                novo_valor = novo.value if hasattr(novo, "value") else str(novo)
+                if novo_valor == "pendente" or (novo_valor == "ativo" and atual["status"] == "pendente"):
+                    raise HTTPException(status_code=400, detail="Usuário pendente só é ativado pelo código de ativação")
                 sets.append("status = %s")
-                params.append(novo)
+                params.append(novo_valor)
+
+            if not sets:
+                return atual
 
             params.append(id_usuario)
             try:
