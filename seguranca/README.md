@@ -64,7 +64,7 @@ Contorno tentado: pedir código por e-mail no lugar do TOTP → 409; reuso de c�
 python seguranca/testes/idor_antes_depois.py --fase depois --usuario-a <idA> --sensor-a <sA> --usuario-b <idB> --sensor-b <sB> --lote-b <lB>
 pytest src/tests/test_api_idor.py
 ```
-**6. Resultado.** Antes: `idor_antes_K7Q2M9.txt` (feito no commit `f3abc5a`, anterior ao escopo por dono: tentativas passam). Depois: `idor_depois_K7Q2M9.txt` + vídeo. Contorno: IDs alterados em todas as rotas listadas, métodos de escrita e `id_sensor` em query string.
+**6. Resultado.** Antes: `idor_antes_K7Q2M9.txt` (feito no commit `f3abc5a`, anterior ao escopo por dono: tentativas passam). Antes, o usuário A leu sensor, leituras, estatísticas, leituras rejeitadas e lote do usuário B (200); PUT/PATCH/DELETE já davam 403 por regra de perfil, e `/leituras/ultima` deu 404 porque o sensor de teste não tinha leituras. Depois: `idor_depois_K7Q2M9.txt` + vídeo `idor_depois_K7Q2M9.mp4` (≤90 s): as leituras e o lote do B passam a dar 404. Contorno: IDs alterados em todas as rotas listadas, métodos de escrita e `id_sensor` em query string.
 
 **7. Limitações.** Analista e Administrador têm escopo total por regra de negócio. Não há rota de "comando" ao dispositivo (o ESP32 só publica no ThingSpeak). O stream SSE (`/dashboard/stream`) é global do talhão A1, não por dono. Próximo passo: testes automatizados com banco real no pipeline.
 
