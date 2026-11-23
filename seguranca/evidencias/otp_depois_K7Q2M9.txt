@@ -1,0 +1,21 @@
+# otp  |  missão K7Q2M9  |  2026-11-22 22:59:00  |  API http://127.0.0.1:8000
+== Cadastro do segundo fator
+[OK ] iniciar cadastro devolve QR Code (PNG) e URI otpauth -> 200
+[OK ] confirmar com o código do app ativa e entrega códigos de recuperação -> 200
+
+== Login
+[OK ] senha certa SEM código: não recebe access_token 
+[OK ] token temporário não abre rota protegida -> 401
+[OK ] código ERRADO é recusado -> 401
+[OK ] código VENCIDO (3 min atrás) é recusado -> 401
+[OK ] código VÁLIDO é aceito (access_token) -> 200
+[OK ] o MESMO código usado de novo é recusado (reuso) -> 401
+
+== Código de recuperação
+[OK ] código de recuperação funciona na 1ª vez -> 200
+[OK ] o mesmo código de recuperação NÃO funciona na 2ª vez -> 401
+
+== Tentativa de contorno
+[OK ] pedir código por e-mail no lugar do TOTP é negado (sem rebaixar o 2º fator) -> 409
+
+Resultado: TUDO CERTO

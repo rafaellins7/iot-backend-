@@ -1,0 +1,5 @@
+# otp  |  missão K7Q2M9  |  2026-11-22 22:51:20  |  API http://127.0.0.1:8000
+login só com a senha -> ['access_token', 'deve_trocar_senha', 'expires_in', 'token_type']
+VULNERÁVEL: entrou só com a senha
+
+Resultado: TUDO CERTO
