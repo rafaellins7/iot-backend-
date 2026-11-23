@@ -88,7 +88,10 @@ class RedefinirSenhaIn(BaseModel):
 
 # ---------- helpers ----------
 def _ip(request: Request) -> str | None:
-    return request.client.host if request.client else None
+    host = request.client.host if request.client else None
+    if host in ("testclient", None):
+        return "127.0.0.1"
+    return host
 
 
 _ACOES_FALHA = ("falha", "bloqueado", "negado", "limite", "reutilizado", "expirado")
