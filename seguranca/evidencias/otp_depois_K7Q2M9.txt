@@ -1,4 +1,4 @@
-# otp  |  missão K7Q2M9  |  2026-11-22 22:59:00  |  API http://127.0.0.1:8000
+# otp  |  missão K7Q2M9  |  2026-11-23 09:49:07  |  API http://127.0.0.1:8000
 == Cadastro do segundo fator
 [OK ] iniciar cadastro devolve QR Code (PNG) e URI otpauth -> 200
 [OK ] confirmar com o código do app ativa e entrega códigos de recuperação -> 200
