@@ -8,11 +8,12 @@ from src import config
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field 
 
+from .. import seguranca_log, totp_db
 from ..deps import get_conn
 from ..deps_auth import carregar_usuario, get_current_user_sem_bloqueio
 from ..email_service import enviar_aviso_conta_ativada, enviar_aviso_senha_alterada, enviar_codigo_login, enviar_link_reset_senha
 from ..security_auth import (
-    ACCESS_MIN, DUMMY_HASH, REFRESH_DIAS,
+    ACCESS_MIN, DUMMY_HASH, PENDING_MIN, REFRESH_DIAS,
     criar_access_token, criar_token_2fa, decodificar, gerar_codigo_email,
     hash_codigo_email, hash_senha, hash_token, normalizar_codigo_ativacao, novo_refresh, precisa_rehash,
     validar_politica_senha, verificar_senha,
@@ -249,6 +250,18 @@ def _gerar_e_enviar_codigo(conn, user: dict, background: BackgroundTasks) -> str
 
 # ---------- login ----------
 def _continuar_login(conn, user, request, response, background):
+    # Segundo fator por aplicativo autenticador (TOTP): quem cadastrou sempre passa por ele,
+    # com ou sem LOGIN_2FA_EMAIL, e o e-mail nunca vale no lugar (evita rebaixar o 2º fator).
+    if totp_db.tem_totp_ativo(conn, user["id_usuario"]):
+        _audit(conn, user["id_usuario"], "login_senha_ok_aguardando_totp", request)
+        conn.commit()
+        return {
+            "requer_2fa": True,
+            "metodo": "totp",
+            "expira_em_min": PENDING_MIN,
+            "token_temporario": criar_token_2fa(user["id_usuario"]),
+        }
+
     if os.getenv("LOGIN_2FA_EMAIL", "true").lower() != "true":
         sessao = _emitir_sessao(conn, user, request, response)
         _audit(conn, user["id_usuario"], "login_ok", request)
@@ -370,6 +383,9 @@ def ativar_conta(body: AtivarContaIn, request: Request, response: Response, back
 @router.post("/2fa/reenviar")
 def reenviar_codigo(body: TokenTempIn, request: Request, background: BackgroundTasks, conn=Depends(get_conn)):
     user = _usuario_do_token_temporario(conn, body.token_temporario)
+    if totp_db.tem_totp_ativo(conn, user["id_usuario"]):
+        seguranca_log.bloqueio("OTP", "reenvio_por_email_negado_usuario_usa_totp", user["id_usuario"], ip=_ip(request))
+        raise HTTPException(status.HTTP_409_CONFLICT, "Esta conta usa aplicativo autenticador; não há código por e-mail.")
     if _bloqueado(conn, user["id_usuario"]):
         _negar_bloqueio(conn, request, user["id_usuario"], "2fa_bloqueado")
 
@@ -387,7 +403,19 @@ def reenviar_codigo(body: TokenTempIn, request: Request, background: BackgroundT
 def verificar_2fa(body: Verify2FAIn, request: Request, response: Response, conn=Depends(get_conn)):
     user = _usuario_do_token_temporario(conn, body.token_temporario)
     if _bloqueado(conn, user["id_usuario"]):
+        seguranca_log.bloqueio("OTP", "conta_bloqueada_por_excesso_de_falhas", user["id_usuario"], ip=_ip(request))
         _negar_bloqueio(conn, request, user["id_usuario"], "2fa_bloqueado")
+
+    if totp_db.tem_totp_ativo(conn, user["id_usuario"]):
+        metodo = totp_db.verificar_e_consumir(conn, user["id_usuario"], body.codigo)
+        if metodo is None:
+            # errado, vencido (fora da janela de ±30 s) ou já usado: a resposta é a mesma de propósito
+            seguranca_log.bloqueio("OTP", "codigo_recusado(errado_vencido_ou_reutilizado)", user["id_usuario"], ip=_ip(request))
+            _negar(conn, request, user["id_usuario"], "2fa_falha", msg="Código inválido")
+        sessao = _emitir_sessao(conn, user, request, response)
+        _audit(conn, user["id_usuario"], "login_ok_2fa_recuperacao" if metodo == "recuperacao" else "login_ok_2fa_totp", request)
+        conn.commit()
+        return sessao
 
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(

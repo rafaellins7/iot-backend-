@@ -6,7 +6,7 @@ from psycopg2.extras import RealDictCursor
 
 from src.api.deps import get_conn
 from src.api.deps_auth import get_current_user
-from src.api.escopo import exigir_sensor, filtrar_leituras_por_dono
+from src.api.escopo import exigir_sensor, filtrar_leituras_por_dono, nao_encontrado
 from src.api.filtros import clausula, montar_where
 from src.api.schemas import EstatisticasLeituraOut, LeituraOut
 
@@ -99,5 +99,5 @@ def obter_leitura(id_leitura: int, conn=Depends(get_conn), user=Depends(get_curr
         cur.execute(SELECT_BASE + " WHERE " + " AND ".join(where), params)
         leitura = cur.fetchone()
     if leitura is None:
-        raise HTTPException(status_code=404, detail="Leitura não encontrada")
+        raise nao_encontrado(user, "leitura", id_leitura, "Leitura não encontrada")
     return leitura

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from src.api.alerta_detalhe import JANELA_SERIE_HORAS, montar_detalhe
 from src.api.deps import get_conn
 from src.api.deps_auth import get_current_user
-from src.api.escopo import filtrar_por_dono, id_dono
+from src.api.escopo import filtrar_por_dono, id_dono, nao_encontrado
 
 router = APIRouter(prefix="/alertas", tags=["alertas"])
 
@@ -103,7 +103,7 @@ def obter_alerta(id_alerta: int, conn=Depends(get_conn), user=Depends(get_curren
                     (id_alerta, id_dono(user), id_dono(user)))
         linha = cur.fetchone()
     if linha is None:
-        raise HTTPException(status_code=404, detail="Alerta não encontrado")
+        raise nao_encontrado(user, "alerta", id_alerta, "Alerta não encontrado")
     return _saida(linha)
 
 
@@ -127,7 +127,7 @@ def detalhe_alerta(id_alerta: int, conn=Depends(get_conn), user=Depends(get_curr
                     (id_alerta, id_dono(user), id_dono(user)))
         linha = cur.fetchone()
         if linha is None:
-            raise HTTPException(status_code=404, detail="Alerta não encontrado")
+            raise nao_encontrado(user, "alerta", id_alerta, "Alerta não encontrado")
         alerta = _saida(dict(linha))
 
         contexto = limites = leitura_atual = leitura_gatilho = None
