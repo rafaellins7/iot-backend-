@@ -1,0 +1,30 @@
+2026-11-22 22:59:02,755 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=3 ip=127.0.0.1
+2026-11-22 22:59:02,859 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=3 ip=127.0.0.1
+2026-11-22 22:59:03,384 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=3 ip=127.0.0.1
+2026-11-22 22:59:04,178 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=3 ip=127.0.0.1
+2026-11-22 22:59:04,579 WARNING [K7Q2M9] BLOQUEIO OTP: reenvio_por_email_negado_usuario_usa_totp usuario=3 ip=127.0.0.1
+2026-11-23 09:35:37,042 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:35:37,116 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:35:37,186 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:35:37,260 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:35:37,334 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:35:37,413 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:35:37,501 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_lote_de_outro_dono_ou_inexistente usuario=3 id_solicitado=147
+2026-11-23 09:35:37,579 WARNING [K7Q2M9] BLOQUEIO IDOR: perfil_sem_permissao_para_o_metodo usuario=3 metodo=PUT rota=/sensores/5
+2026-11-23 09:35:37,757 WARNING [K7Q2M9] BLOQUEIO IDOR: perfil_sem_permissao_para_o_metodo usuario=3 metodo=PATCH rota=/lotes/147
+2026-11-23 09:35:37,824 WARNING [K7Q2M9] BLOQUEIO IDOR: perfil_sem_permissao_para_o_metodo usuario=3 metodo=DELETE rota=/sensores/5
+2026-11-23 09:47:24,489 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:47:24,603 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:47:24,694 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:47:24,773 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:47:24,861 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:47:24,957 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_sensor_de_outro_dono_ou_inexistente usuario=3 id_solicitado=5
+2026-11-23 09:47:25,046 WARNING [K7Q2M9] BLOQUEIO IDOR: acesso_a_lote_de_outro_dono_ou_inexistente usuario=3 id_solicitado=147
+2026-11-23 09:47:25,127 WARNING [K7Q2M9] BLOQUEIO IDOR: perfil_sem_permissao_para_o_metodo usuario=3 metodo=PUT rota=/sensores/5
+2026-11-23 09:47:25,245 WARNING [K7Q2M9] BLOQUEIO IDOR: perfil_sem_permissao_para_o_metodo usuario=3 metodo=PATCH rota=/lotes/147
+2026-11-23 09:47:25,397 WARNING [K7Q2M9] BLOQUEIO IDOR: perfil_sem_permissao_para_o_metodo usuario=3 metodo=DELETE rota=/sensores/5
+2026-11-23 09:49:09,710 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=5 ip=127.0.0.1
+2026-11-23 09:49:09,811 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=5 ip=127.0.0.1
+2026-11-23 09:49:10,389 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=5 ip=127.0.0.1
+2026-11-23 09:49:10,890 WARNING [K7Q2M9] BLOQUEIO OTP: codigo_recusado(errado_vencido_ou_reutilizado) usuario=5 ip=127.0.0.1
+2026-11-23 09:49:11,151 WARNING [K7Q2M9] BLOQUEIO OTP: reenvio_por_email_negado_usuario_usa_totp usuario=5 ip=127.0.0.1

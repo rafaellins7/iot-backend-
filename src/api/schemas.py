@@ -251,11 +251,30 @@ class CorteAlertaPreditivo(BaseModel):
     acao_recomendada: str
     
 class ParecerEstruturadoSchema(BaseModel):
-    parecer_agronomico: str = Field(..., description="Análise agronômica do estado do lote, VPD, ETc e prejuízo")
-    parecer_fisiologico: str = Field(..., description="Análise do estresse hídrico/térmico e fisiologia vegetal")
-    recomendacoes: List[str] = Field(..., description="Lista de ações recomendadas")
-    nivel_confianca: str = Field(..., description="Confiança: ALTO, MEDIO ou BAIXO")
-    limitacoes: List[str] = Field(..., description="Ressalvas e indicação de dados simulados")
+    parecer_agronomico: str = Field(
+        ..., description="Análise agronômica do estado do lote, VPD, ETc e prejuízo")
+    parecer_fisiologico: str = Field(
+        default="Sem dados suficientes para o parecer fisiológico.",
+        description="Análise do estresse hídrico/térmico e fisiologia vegetal")
+    recomendacoes: List[str] = Field(
+        default_factory=list, description="Lista de ações recomendadas")
+    nivel_confianca: str = Field(
+        default="BAIXO", description="Confiança: ALTO, MEDIO ou BAIXO")
+    limitacoes: List[str] = Field(
+        default_factory=list, description="Ressalvas e dados ausentes ou incompletos")
+
+    # Se o modelo mandar null (None) num campo, usa o valor padrão em vez de dar erro
+    @field_validator("parecer_fisiologico", "nivel_confianca", mode="before")
+    @classmethod
+    def _texto_nulo(cls, v, info):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return cls.model_fields[info.field_name].default
+        return v
+
+    @field_validator("recomendacoes", "limitacoes", mode="before")
+    @classmethod
+    def _lista_nula(cls, v):
+        return [] if v is None else v
 
 class ParecerIAResponse(BaseModel):
     id_lote: int

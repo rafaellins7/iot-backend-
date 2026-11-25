@@ -20,6 +20,7 @@ DIRETRIZES RÍGIDAS:
 4. Se a chave "contem_dados_simulados" for true, cite obrigatoriamente essa condição na lista de limitações.
 5. Responda ESTRITAMENTE em formato JSON com as chaves: parecer_agronomico (texto), parecer_fisiologico (texto),
    recomendacoes (lista de textos), nivel_confianca ("ALTO", "MEDIO" ou "BAIXO") e limitacoes (lista de textos).
+Responda SEMPRE com as duas chaves, parecer_agronomico e parecer_fisiologico. Se faltar dado, escreva 'Sem dados suficientes' em vez de omitir a chave.
 """
 
 
