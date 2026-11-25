@@ -15,6 +15,9 @@ pydantic[email]
 bcrypt
 argon2-cffi
 pyjwt
+pyotp
+qrcode[pil]
+cryptography
 
 # Testes
 pytest
