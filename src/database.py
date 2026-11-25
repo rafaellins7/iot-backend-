@@ -11,6 +11,7 @@ def conectar():
         dbname=config.DB_NAME,
         user=config.DB_USER,
         password=config.DB_PASSWORD,
+        url=config.DB_URL
     )
 
 
