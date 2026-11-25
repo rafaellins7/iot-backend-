@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src import coleta_automatica, config
+from src import coleta_automatica, config, agendador
 from src.api.deps_auth import (ADMIN, ANALISTA, PRODUTOR_EXPORTADOR, get_current_user, require_role,
                                 require_role_por_metodo)
 from src.api.routers import (alertas, alertas_preditivos, analista, central_alertas, auditoria, auth,
@@ -50,6 +50,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app):
     # Coleta do ThingSpeak em segundo plano (desligue com COLETA_AUTOMATICA=false)
     task = coleta_automatica.iniciar()
+    agendador.iniciar_em_segundo_plano()  # risco, janela, irrigação, prejuízo, preditivos e IA
     try:
         yield
     finally:
