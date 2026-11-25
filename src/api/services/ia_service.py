@@ -1,6 +1,8 @@
 """Parecer automático de IA (somente leitura para o usuário): prompt, texto de reserva e geração."""
 import json
 import logging
+import os
+import re
 
 from pydantic import ValidationError
 
@@ -13,15 +15,52 @@ PROMPT_SISTEMA_PARECER = """
 Você é um Engenheiro Agrônomo e Fisiologista Vegetal sênior especialista em agricultura de precisão.
 Sua função é interpretar os dados numéricos fornecidos no JSON e redigir um parecer técnico, agronômico e fisiológico.
 
-DIRETRIZES RÍGIDAS:
-1. NÃO calcule ou altere nenhum número. Todos os valores numéricos já foram calculados pelo sistema.
-2. Valores null significam "dado indisponível": não invente nem estime; cite a lacuna em "limitacoes".
-3. Interprete os dados recebidos explicando os impactos fisiológicos na cultura.
-4. Se a chave "contem_dados_simulados" for true, cite obrigatoriamente essa condição na lista de limitações.
-5. Responda ESTRITAMENTE em formato JSON com as chaves: parecer_agronomico (texto), parecer_fisiologico (texto),
-   recomendacoes (lista de textos), nivel_confianca ("ALTO", "MEDIO" ou "BAIXO") e limitacoes (lista de textos).
-Responda SEMPRE com as duas chaves, parecer_agronomico e parecer_fisiologico. Se faltar dado, escreva 'Sem dados suficientes' em vez de omitir a chave.
+DIRETRIZES RÍGIDAS DE FORMATAÇÃO E CONTEÚDO:
+1. Responda exclusivamente em texto puro. NÃO utilize formatação LaTeX (como \\text, $, $$, barras invertidas). NÃO utilize formatação Markdown (como **, *, #, marcadores ou blocos de código).
+2. É OBRIGATÓRIO responder em formato JSON contendo exatamente as 5 chaves a seguir, sem omitir nenhuma:
+   - "parecer_agronomico" (string em texto corrido puro)
+   - "parecer_fisiologico" (string em texto corrido puro)
+   - "recomendacoes" (lista de strings em texto puro)
+   - "nivel_confianca" (string: obrigatoriamente "ALTO", "MEDIO" ou "BAIXO")
+   - "limitacoes" (lista de strings em texto puro)
+3. Se faltar dado no snapshot para qualquer análise ou se um valor for null, NUNCA omita a chave; escreva "sem dados suficientes" em vez de omitir ou deixar em branco.
+4. NÃO calcule ou altere nenhum número. Todos os valores numéricos já foram calculados pelo sistema.
+5. Se "contem_dados_simulados" for true, cite obrigatoriamente essa condição na lista de limitações.
 """
+
+
+def _limpar_estilos(texto: str) -> str:
+    """Remove qualquer fragmento residual de LaTeX ou Markdown."""
+    if not isinstance(texto, str):
+        return texto
+    t = re.sub(r'\\text\{([^}]*)\}', r'\1', texto)
+    t = re.sub(r'\\[a-zA-Z]+', '', t)
+    t = t.replace('$$', '').replace('$', '')
+    t = re.sub(r'[*_#`]', '', t)
+    return t.strip()
+
+
+def _sanitizar_conteudo(d: dict) -> dict:
+    if not isinstance(d, dict):
+        return d
+    limpo = {}
+    for k, v in d.items():
+        if isinstance(v, str):
+            limpo[k] = _limpar_estilos(v)
+        elif isinstance(v, list):
+            limpo[k] = [_limpar_estilos(item) if isinstance(item, str) else item for item in v]
+        else:
+            limpo[k] = v
+
+    for chave in ("parecer_agronomico", "parecer_fisiologico"):
+        if not limpo.get(chave):
+            limpo[chave] = "sem dados suficientes"
+    for chave in ("recomendacoes", "limitacoes"):
+        if not limpo.get(chave):
+            limpo[chave] = ["sem dados suficientes"]
+    if limpo.get("nivel_confianca") not in ("ALTO", "MEDIO", "BAIXO"):
+        limpo["nivel_confianca"] = "BAIXO"
+    return limpo
 
 
 def gerar_parecer_fallback(dados: dict) -> dict:
@@ -63,11 +102,14 @@ def gerar_parecer_fallback(dados: dict) -> dict:
 def gerar_parecer(snapshot: dict) -> tuple[dict, str, bool]:
     """Devolve (conteudo, modelo, usou_fallback). Nunca levanta: se a IA falhar ou responder
     algo fora do formato, cai no texto determinístico."""
+    modelo_unico = (os.getenv("PARECER_MODELO") or "").strip() or None
     try:
         bruto, modelo = gerar_json(
             PROMPT_SISTEMA_PARECER,
             f"Dados calculados do lote:\n{json.dumps(snapshot, ensure_ascii=False)}",
+            modelo_override=modelo_unico,
         )
+        bruto = _sanitizar_conteudo(bruto)
         conteudo = ParecerEstruturadoSchema(**bruto).model_dump()
         return conteudo, modelo, False
     except (LLMError, ValidationError, TypeError) as err:

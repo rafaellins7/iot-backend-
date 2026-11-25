@@ -37,6 +37,7 @@ class DadosMercadoOut(BaseModel):
     id_fruta: Optional[int] = None
     fruta: Optional[str] = None
     preco: Optional[float] = None
+    preco_kg: Optional[float] = None
     unidade: Optional[str] = None
     moeda: Optional[str] = None
     demanda_exportacao: Optional[float] = None
@@ -46,7 +47,12 @@ class DadosMercadoOut(BaseModel):
 #a coluna no banco é "data_refencia" (sem o "re"); a API usa o nome correto.
 SELECT_BASE = """
     SELECT d.id_mercado, d.fk_fruta_id_fruta AS id_fruta, f.nome AS fruta,
-           d.preco, d.unidade, d.moeda, d.demanda_exportacao,
+           d.preco,
+           CASE lower(COALESCE(d.unidade, 'kg')::text)
+               WHEN 't' THEN d.preco / 1000.0
+               ELSE d.preco
+           END AS preco_kg,
+           d.unidade, d.moeda, d.demanda_exportacao,
            d.data_refencia AS data_referencia
     FROM dados_mercado d
     LEFT JOIN fruta f ON f.id_fruta = d.fk_fruta_id_fruta
@@ -90,7 +96,7 @@ def listar_dados_mercado(
     if inicio and fim and inicio > fim:
         raise HTTPException(status_code=400, detail="'inicio' não pode ser maior que 'fim'")
 
-    where, params = [], []
+    where, params = ["d.moeda = 'BRL'"], []
     if id_fruta is not None:
         where.append("d.fk_fruta_id_fruta = %s")
         params.append(id_fruta)

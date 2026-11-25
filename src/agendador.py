@@ -189,25 +189,30 @@ def _alertas_preditivos() -> str:
 
 # ---------------------------------------------------------------- parecer de IA
 def pre_aquecer_pareceres(conn) -> str:
-    """Pede o parecer de cada lote não finalizado. O endpoint só chama a IA quando o parecer em cache
-    venceu (TTL de 60 min), então rodar isto com frequência é barato. Evita a primeira tela esperar a IA."""
+    """Pede o parecer de cada lote não finalizado. Processa sequencialmente com intervalo mínimo
+    de PARECER_INTERVALO_S (padrão 6s) entre chamadas ao provedor."""
     from src.api import previsao_repo as repo
     from src.api.routers import parecer_ia
     with _cursor(conn) as cur:
         ids = [l["id_lote"] for l in repo.lotes_para_prejuizo(cur, None)]
-    contagem = {"IA": 0, "FALLBACK_TEMPLATE": 0, "CACHE": 0, "erro": 0}
+    contagem = {"IA": 0, "FALLBACK_TEMPLATE": 0, "CACHE": 0, "SEM_DADOS": 0, "erro": 0}
+    intervalo_s = float(os.environ.get("PARECER_INTERVALO_S", "6.0"))
+
     for id_lote in ids:
         try:
             r = parecer_ia.obter_parecer(id_lote=id_lote, conn=conn, user=_usuario_sistema())
-            contagem[r["origem"]] = contagem.get(r["origem"], 0) + 1
+            origem = r.get("origem", "desconhecido")
+            contagem[origem] = contagem.get(origem, 0) + 1
+            if origem in ("IA", "FALLBACK_TEMPLATE"):
+                time.sleep(intervalo_s)
         except Exception as e:
             conn.rollback()
             contagem["erro"] += 1
             print(f"[AGENDADOR] parecer_ia lote {id_lote}: {getattr(e, 'detail', e)}")
-    texto = f"{len(ids)} lote(s): {contagem['IA']} gerado(s) pela IA, {contagem['CACHE']} em cache"
-    if contagem["FALLBACK_TEMPLATE"]:
+    texto = f"{len(ids)} lote(s): {contagem.get('IA', 0)} gerado(s) pela IA, {contagem.get('CACHE', 0)} em cache, {contagem.get('SEM_DADOS', 0)} sem dados"
+    if contagem.get("FALLBACK_TEMPLATE", 0):
         texto += f", {contagem['FALLBACK_TEMPLATE']} com texto de reserva (IA indisponível)"
-    if contagem["erro"]:
+    if contagem.get("erro", 0):
         texto += f", {contagem['erro']} com erro"
     return texto
 

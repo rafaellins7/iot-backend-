@@ -1,11 +1,43 @@
 import json
+import logging
 import os
 import time
 
 import requests
 
+logger = logging.getLogger(__name__)
+
 # Erros que valem uma nova tentativa (instabilidade passageira, não erro de chave/modelo/prompt)
 _STATUS_REPETIVEIS = {429, 500, 502, 503, 504}
+
+_ultimo_chamado_ts: float = 0.0
+_chamadas_provedor_timestamps: list[float] = []
+
+
+def contar_chamadas_hora() -> int:
+    agora = time.time()
+    limite = agora - 3600.0
+    while _chamadas_provedor_timestamps and _chamadas_provedor_timestamps[0] < limite:
+        _chamadas_provedor_timestamps.pop(0)
+    return len(_chamadas_provedor_timestamps)
+
+
+def registrar_chamada_provedor() -> int:
+    agora = time.time()
+    _chamadas_provedor_timestamps.append(agora)
+    total = contar_chamadas_hora()
+    logger.info("[LLM] Chamada ao provedor registrada. Total na última hora: %d", total)
+    return total
+
+
+def _esperar_intervalo_minimo():
+    global _ultimo_chamado_ts
+    intervalo = _env_float("PARECER_INTERVALO_S", 6.0)
+    agora = time.time()
+    passado = agora - _ultimo_chamado_ts
+    if passado < intervalo:
+        time.sleep(intervalo - passado)
+    _ultimo_chamado_ts = time.time()
 
 
 class LLMError(Exception):
@@ -145,32 +177,37 @@ def _descrever(e: Exception, provedor: str) -> str:
     return str(e)
 
 
-def gerar_json(system: str, user: str) -> tuple[dict, str]:
+def gerar_json(system: str, user: str, modelo_override: str | None = None) -> tuple[dict, str]:
     """Chama o provedor configurado e devolve (dict_json, 'provedor:modelo').
 
-    Tenta o modelo principal (LLM_MODEL) e, se ele falhar por instabilidade ou não existir para a
-    chave, passa para os de LLM_MODELOS_RESERVA (separados por vírgula).
-    Levanta LLMError em qualquer falha (rede, cota, JSON inválido).
+    Se PARECER_MODELO estiver definido ou modelo_override for passado, usa exclusivamente
+    esse modelo único. Em caso de instabilidade passageira (429, rede), aplica backoff exponencial.
     """
     provedor = os.environ.get("LLM_PROVIDER", "gemini").lower().strip()
     if provedor not in _PROVEDORES:
         raise LLMError(f"LLM_PROVIDER inválido: {provedor}")
 
-    principal = (os.environ.get("LLM_MODEL") or "").strip() or (
-        "gemini-3.5-flash-lite" if provedor == "gemini" else "")
-    if not principal:
-        raise LLMError("Defina LLM_MODEL no .env")
+    modelo_config = (modelo_override or os.environ.get("PARECER_MODELO") or os.environ.get("LLM_MODEL") or "").strip()
+    if not modelo_config and provedor == "gemini":
+        modelo_config = "gemini-2.5-flash"
 
-    reservas = [m.strip() for m in os.environ.get("LLM_MODELOS_RESERVA", "").split(",") if m.strip()]
-    modelos = [principal] + [m for m in reservas if m != principal]
+    # Se configurado modelo único ou override, não tenta modelos de reserva
+    if modelo_override or os.environ.get("PARECER_MODELO"):
+        modelos = [modelo_config]
+    else:
+        principal = modelo_config
+        reservas = [m.strip() for m in os.environ.get("LLM_MODELOS_RESERVA", "").split(",") if m.strip()]
+        modelos = [principal] + [m for m in reservas if m != principal]
 
-    tentativas = _env_int("LLM_TENTATIVAS", 2)
+    tentativas = max(2, _env_int("LLM_TENTATIVAS", 3))
     espera = _env_float("LLM_ESPERA_S", 3.0)
     ultimo_erro: Exception = LLMError("Nenhuma tentativa foi feita.")
 
     for model in modelos:
         for n in range(1, tentativas + 1):
             try:
+                _esperar_intervalo_minimo()
+                registrar_chamada_provedor()
                 bruto = _PROVEDORES[provedor](system, user, model)
                 return _limpar_json(bruto), f"{provedor}:{model}"
             except LLMError:
@@ -178,7 +215,10 @@ def gerar_json(system: str, user: str) -> tuple[dict, str]:
             except Exception as e:
                 ultimo_erro = e
                 if _vale_repetir(e) and n < tentativas:
-                    time.sleep(espera * (2 ** (n - 1)))
+                    delay = espera * (2 ** (n - 1))
+                    logger.warning("[LLM] Falha transitória (%s). Tentativa %d/%d com backoff de %.1fs",
+                                   str(e)[:150], n, tentativas, delay)
+                    time.sleep(delay)
                     continue
                 break                           # esgotou as tentativas ou erro do modelo (ex.: 404): próximo modelo
 

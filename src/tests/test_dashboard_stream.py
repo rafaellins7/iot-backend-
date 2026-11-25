@@ -58,19 +58,20 @@ def test_payload_real_quando_a_leitura_e_recente(monkeypatch):
     assert p["origem"] == "real" and p["temperatura"] == 27.4 and p["sensor"] == "Sensor 1"
 
 
-def test_payload_simulado_e_rotulado_quando_a_leitura_esta_velha(monkeypatch):
+def test_payload_real_offline_quando_a_leitura_esta_velha(monkeypatch):
     dh = _agora() - timedelta(minutes=30)
     monkeypatch.setattr(ds, "buscar_ultima_leitura", lambda: {
         "temperatura": 27.4, "umidade": 61.2, "data_hora": dh, "sensor": "Sensor 1"})
     p = ds.montar_payload()
-    assert p["origem"] == "simulado" and "simulado" in p["sensor"]
+    assert p["origem"] == "real" and p["status"] == "offline" and p["timestamp"] == dh.isoformat()
 
 
 def test_banco_fora_do_ar_nao_derruba_o_stream(monkeypatch):
     def quebra():
         raise RuntimeError("banco indisponível")
     monkeypatch.setattr(ds, "buscar_ultima_leitura", quebra)
-    assert ds.montar_payload()["origem"] == "simulado"
+    p = ds.montar_payload()
+    assert p["status"] == "sem_dados"
 
 
 # ---------------------------------------------------------------- ticket do stream

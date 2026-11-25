@@ -51,25 +51,39 @@ def preco_kg_atual(cur, id_fruta, validade_dias):
     return float(r["preco_kg"]) if r else None
 
 
-def horas_fora_da_faixa(cur, id_fruta, etapa, janela_dias):
-    """Horas da sequência ininterrupta de leituras fora da faixa (config_parametro), até a mais recente."""
+def horas_fora_da_faixa(cur, id_fruta, etapa, janela_dias, id_lote=None):
+    """Horas da sequência ininterrupta de leituras fora da faixa (config_parametro), até a mais recente.
+    Se id_lote for informado, filtra exclusivamente sensores e leituras do próprio lote.
+    Sem leituras para o lote, devolve None."""
     cur.execute("""SELECT temp_min, temp_max FROM config_parametro
                    WHERE fk_fruta_id_fruta = %s AND etapa = %s LIMIT 1""", (id_fruta, etapa))
     faixa = cur.fetchone()
     if not faixa:
         return None
-    cur.execute("""SELECT l.temperatura, l.data_hora FROM leitura_climatica l   -- colunas: ASSUMIDO
-                   JOIN sensor s ON s.id_sensor = l.fk_sensor_id_sensor
-                   WHERE s.ambiente <> 'solo'
-                     AND l.data_hora >= (SELECT max(data_hora) FROM leitura_climatica)
-                                        - make_interval(days => %s)
-                   ORDER BY l.data_hora DESC""", (int(janela_dias),))
+    if id_lote is not None:
+        cur.execute("""SELECT l.temperatura, l.data_hora FROM leitura_climatica l
+                       JOIN sensor s ON s.id_sensor = l.fk_sensor_id_sensor
+                       WHERE s.ambiente <> 'solo'
+                         AND s.fk_lote_id_lote = %s
+                         AND l.data_hora >= (
+                             SELECT max(l2.data_hora) FROM leitura_climatica l2
+                             JOIN sensor s2 ON s2.id_sensor = l2.fk_sensor_id_sensor
+                             WHERE s2.fk_lote_id_lote = %s AND s2.ambiente <> 'solo'
+                         ) - make_interval(days => %s)
+                       ORDER BY l.data_hora DESC""", (id_lote, id_lote, int(janela_dias)))
+    else:
+        cur.execute("""SELECT l.temperatura, l.data_hora FROM leitura_climatica l
+                       JOIN sensor s ON s.id_sensor = l.fk_sensor_id_sensor
+                       WHERE s.ambiente <> 'solo'
+                         AND l.data_hora >= (SELECT max(data_hora) FROM leitura_climatica)
+                                            - make_interval(days => %s)
+                       ORDER BY l.data_hora DESC""", (int(janela_dias),))
     leituras = cur.fetchall()
     if not leituras:
         return None
     fim = inicio = leituras[0]["data_hora"]
     for r in leituras:
-        if faixa["temp_min"] <= r["temperatura"] <= faixa["temp_max"]:
+        if r["temperatura"] is None or faixa["temp_min"] <= r["temperatura"] <= faixa["temp_max"]:
             break
         inicio = r["data_hora"]
     return round((fim - inicio).total_seconds() / 3600, 2)
