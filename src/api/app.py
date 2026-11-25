@@ -1,7 +1,10 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src import config
+from src import coleta_automatica, config
 from src.api.deps_auth import (ADMIN, ANALISTA, PRODUTOR_EXPORTADOR, get_current_user, require_role,
                                 require_role_por_metodo)
 from src.api.routers import (alertas, alertas_preditivos, analista, central_alertas, auditoria, auth,
@@ -40,7 +43,20 @@ so_analista = [Depends(require_role_por_metodo(
 so_produtor = [Depends(require_role_por_metodo(
     leitura=(PRODUTOR_EXPORTADOR,), escrita=()))]
 
-app = FastAPI(title="API - Dashboard Climático e Logístico")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+
+@asynccontextmanager
+async def lifespan(app):
+    # Coleta do ThingSpeak em segundo plano (desligue com COLETA_AUTOMATICA=false)
+    task = coleta_automatica.iniciar()
+    try:
+        yield
+    finally:
+        await coleta_automatica.parar(task)
+
+
+app = FastAPI(title="API - Dashboard Climático e Logístico", lifespan=lifespan)
 
 @app.get("/", include_in_schema=False)
 def raiz():

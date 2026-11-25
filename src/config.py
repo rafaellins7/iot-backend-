@@ -6,6 +6,8 @@ load_dotenv()
 THINGSPEAK_CHANNEL_ID = os.getenv("THINGSPEAK_CHANNEL_ID", "")
 THINGSPEAK_READ_API_KEY = os.getenv("THINGSPEAK_READ_API_KEY", "")
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "20"))
+# Liga/desliga a coleta ThingSpeak dentro da API (lifespan do FastAPI). Nos testes fica false.
+COLETA_AUTOMATICA = os.getenv("COLETA_AUTOMATICA", "true").strip().lower() in ("1", "true", "sim", "yes")
 
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
