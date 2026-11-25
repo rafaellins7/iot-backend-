@@ -16,7 +16,8 @@ router = APIRouter(prefix="/sensores", tags=["sensores"])
 
 SELECT_BASE = """
     SELECT s.id_sensor, s.nome, s.tipo_sensor, s.localizacao, s.channel_id,
-           s.status::text AS status, s.fk_lote_id_lote AS id_lote, s.ambiente,
+           s.status::text AS status, s.fk_lote_id_lote AS id_lote,
+           s.fk_usuario_id_usuario AS id_usuario, s.ambiente,
            u.data_hora AS ultima_leitura, u.temperatura, u.umidade,
            u.umidade_solo, u.temperatura_solo, u.origem
     FROM sensor s
@@ -36,6 +37,8 @@ COLUNAS_EDITAVEIS = {
     "localizacao": "localizacao",
     "channel_id": "channel_id",
     "id_lote": "fk_lote_id_lote",
+    "id_usuario": "fk_usuario_id_usuario",
+    "fk_usuario_id_usuario": "fk_usuario_id_usuario",
     "ambiente": "ambiente",
     "status": "status",
 }
@@ -221,19 +224,20 @@ def criar_sensor(dados: SensorCreate, request: Request, conn=Depends(get_conn)):
                 raise HTTPException(status_code=400, detail="Lote inexistente")
             if dados.channel_id is not None and _channel_em_uso(cur, dados.channel_id):
                 raise HTTPException(status_code=409, detail="channel_id já cadastrado")
+            dono_id = dados.id_usuario if dados.id_usuario is not None else dados.fk_usuario_id_usuario
             try:
                 cur.execute(
                     """
                     INSERT INTO sensor
                         (nome, tipo_sensor, localizacao, channel_id, status,
-                         fk_lote_id_lote, ambiente)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                         fk_lote_id_lote, fk_usuario_id_usuario, ambiente)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id_sensor
                     """,
                     (
                         dados.nome, dados.tipo_sensor, dados.localizacao,
                         dados.channel_id, dados.status.value, dados.id_lote,
-                        dados.ambiente.value,
+                        dono_id, dados.ambiente.value,
                     ),
                 )
             except errors.UniqueViolation:

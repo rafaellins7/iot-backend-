@@ -1,7 +1,9 @@
+import csv
+import io
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from psycopg2.extras import RealDictCursor
 
 from src.api.deps import get_conn
@@ -89,6 +91,40 @@ def estatisticas_leituras(
             params,
         )
         return cur.fetchone()
+
+
+@router.get("/exportar.csv")
+def exportar_leituras_csv(
+    id_sensor: Optional[int] = None,
+    inicio: Optional[datetime] = Query(None, description="Data/hora inicial"),
+    fim: Optional[datetime] = Query(None, description="Data/hora final"),
+    conn=Depends(get_conn),
+    user=Depends(get_current_user),
+):
+    where_sql, params = _filtros(user, id_sensor, inicio, fim)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        exigir_sensor(cur, user, id_sensor)
+        cur.execute(
+            SELECT_BASE + where_sql + " ORDER BY data_hora DESC, id_leitura DESC LIMIT 5000",
+            params,
+        )
+        rows = cur.fetchall()
+
+    colunas = ["id_leitura", "id_sensor", "data_hora", "temperatura", "umidade", "umidade_solo", "temperatura_solo", "origem", "entry_id_thingspeak"]
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=colunas, delimiter=";", extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        item = dict(r)
+        if item.get("data_hora"):
+            item["data_hora"] = item["data_hora"].isoformat()
+        w.writerow(item)
+
+    return Response(
+        content="\ufeff" + buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="leituras.csv"'},
+    )
 
 
 @router.get("/{id_leitura}", response_model=LeituraOut)

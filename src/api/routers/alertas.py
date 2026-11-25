@@ -85,12 +85,33 @@ def listar_alertas(
 
 
 @router.post("/reconhecer-todos")
-def reconhecer_todos(conn=Depends(get_conn)):
-    """Move todos os alertas 'aberto' para 'reconhecido'."""
+def reconhecer_todos(conn=Depends(get_conn), user=Depends(get_current_user)):
+    """Move todos os alertas 'aberto' no escopo do usuário para 'reconhecido'."""
+    dono = id_dono(user)
     with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE alerta SET status = 'reconhecido' WHERE lower(status) = 'aberto'"
-        )
+        if dono is None:
+            cur.execute(
+                "UPDATE alerta SET status = 'reconhecido' WHERE lower(status) = 'aberto'"
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE alerta a
+                   SET status = 'reconhecido'
+                 WHERE lower(a.status) = 'aberto'
+                   AND (
+                       a.fk_leitura_id_leitura IS NULL
+                       OR EXISTS (
+                           SELECT 1
+                             FROM leitura_climatica r
+                             JOIN sensor s ON s.id_sensor = r.fk_sensor_id_sensor
+                            WHERE r.id_leitura = a.fk_leitura_id_leitura
+                              AND s.fk_usuario_id_usuario = %s
+                       )
+                   )
+                """,
+                (dono,),
+            )
         n = cur.rowcount
     conn.commit()
     return {"reconhecidos": n}
@@ -183,8 +204,20 @@ def detalhe_alerta(id_alerta: int, conn=Depends(get_conn), user=Depends(get_curr
 
 
 @router.patch("/{id_alerta}/status", response_model=AlertaOut)
-def atualizar_status_alerta(id_alerta: int, dados: AlertaStatusUpdate, conn=Depends(get_conn)):
+def atualizar_status_alerta(
+    id_alerta: int,
+    dados: AlertaStatusUpdate,
+    conn=Depends(get_conn),
+    user=Depends(get_current_user),
+):
+    dono = id_dono(user)
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            SELECT_BASE + " WHERE a.id_alerta = %s AND (%s::int IS NULL OR s.fk_usuario_id_usuario = %s)",
+            (id_alerta, dono, dono),
+        )
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Alerta não encontrado")
         cur.execute(
             "UPDATE alerta SET status = %s WHERE id_alerta = %s RETURNING id_alerta",
             (dados.status.strip().lower(), id_alerta),
