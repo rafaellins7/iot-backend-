@@ -46,7 +46,7 @@ def resumo(conn=Depends(get_conn), user=Depends(get_current_user)):
     # Produtor: todos os números abaixo consideram só os sensores/lotes dele (None = escopo total)
     p = {"dono": id_dono(user)}
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        # Cartão "Sensores ativos": real = tem leitura com origem 'thingspeak'
+        # Cartão "Sensores ativos": real = tem leitura com origem 'thingspeak' ou 'thingspeak-solo'
         cur.execute("""
             SELECT COUNT(*) FILTER (WHERE s.status::text = 'ativo')::int AS ativos,
                    COUNT(*)::int AS total,
@@ -54,7 +54,7 @@ def resumo(conn=Depends(get_conn), user=Depends(get_current_user)):
                        WHERE s.status::text = 'ativo'
                          AND EXISTS (SELECT 1 FROM leitura_climatica l
                                      WHERE l.fk_sensor_id_sensor = s.id_sensor
-                                       AND lower(l.origem) = 'thingspeak')
+                                       AND lower(l.origem) LIKE 'thingspeak%%')
                    )::int AS reais
             FROM sensor s
             WHERE (%(dono)s::int IS NULL OR s.fk_usuario_id_usuario = %(dono)s)
@@ -138,6 +138,19 @@ def resumo(conn=Depends(get_conn), user=Depends(get_current_user)):
         """, p)
         ar = cur.fetchone()
 
+        # Media de umidade do solo nas ultimas 24 h (sensores reais de solo)
+        cur.execute("""
+            SELECT COUNT(*)::int AS n,
+                   AVG(COALESCE(r.umidade_solo, r.umidade)::float8) AS solo_media
+            FROM leitura_climatica r
+            JOIN sensor s ON s.id_sensor = r.fk_sensor_id_sensor
+            WHERE s.ambiente = 'solo'
+              AND lower(r.origem) LIKE 'thingspeak%%'
+              AND r.data_hora >= (now() AT TIME ZONE 'UTC') - interval '24 hours'
+              AND (%(dono)s::int IS NULL OR s.fk_usuario_id_usuario = %(dono)s)
+        """, p)
+        solo = cur.fetchone()
+
     total_monit = lotes["total"]
     return {
         "lotes_monitorados": {
@@ -158,8 +171,10 @@ def resumo(conn=Depends(get_conn), user=Depends(get_current_user)):
             "pct_na_faixa": _arred(faixa["pct"], 1),       # null = sem faixa / sem leitura
             "leituras_avaliadas": faixa["n"],
             "n_leituras_ar": ar["n"],
+            "n_leituras_solo": solo["n"],
             "temperatura_ar_media": _arred(ar["temp_media"], 1),
             "umidade_ar_media": _arred(ar["umid_media"], 0),
+            "umidade_solo_media": _arred(solo["solo_media"], 1),
             "vpd_medio_kpa": _arred(ar["vpd_medio"], 2),
         },
         "fluxo_lotes": {

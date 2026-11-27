@@ -1,6 +1,6 @@
 """Cadastros de apoio: propriedade, safra, variedade, porto, perda por risco e classificação."""
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from psycopg2.extras import RealDictCursor
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from src.api.auditoria import auditar
 from src.api.deps import get_conn
-from src.api.deps_auth import get_current_user
+from src.api.deps_auth import ADMIN, ANALISTA, get_current_user, require_role
 from src.api.escopo import exigir_lote, id_dono
 
 router = APIRouter(tags=["catalogo"])
@@ -40,34 +40,32 @@ def listar_propriedades(conn=Depends(get_conn)):
 
 class PropriedadeUpdate(BaseModel):
     nome: Optional[str] = Field(default=None, min_length=1, max_length=150)
-    cidade: Optional[str] = Field(default=None, max_length=80)
-    uf: Optional[str] = Field(default=None, min_length=2, max_length=2)
-    setor: Optional[str] = Field(default=None, max_length=40)
-    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
-    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
-    area_ha: Optional[float] = Field(default=None, ge=0)
-    tipo_solo: Optional[str] = Field(default=None, max_length=150)
-    moeda_exibicao: Optional[str] = Field(default=None, min_length=3, max_length=3)
-
-
-class SafraCreate(BaseModel):
-    nome: str = Field(min_length=3, max_length=20)
-    data_inicio: date
-    data_fim: Optional[date] = None
-    meta_ton_ha: Optional[float] = Field(default=None, ge=0)
+    latitude: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    longitude: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
+    area_ha: Optional[float] = Field(default=None, ge=0.0)
+    tipo_solo: Optional[str] = Field(default=None, max_length=120)
+    moeda_exibicao: Optional[Literal["BRL", "USD"]] = None
 
 
 @router.put("/propriedades/{id_propriedade}")
 def atualizar_propriedade(
-    id_propriedade: int, dados: PropriedadeUpdate, request: Request, conn=Depends(get_conn)
+    id_propriedade: int,
+    dados: PropriedadeUpdate,
+    request: Request,
+    conn=Depends(get_conn),
+    user=Depends(require_role(ADMIN)),
 ):
     campos = dados.model_dump(exclude_unset=True)
     if not campos:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhum campo para atualizar")
-    with auditar(request, "atualizar_propriedade") as ctx:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+    with auditar(request, "atualizar_propriedade", user["id_usuario"]) as ctx:
         ctx.detalhe = f"id={id_propriedade} campos={','.join(sorted(campos))}"
-        sets = [f"{k} = %s" for k in campos]
-        params = list(campos.values()) + [id_propriedade]
+        sets, params = [], []
+        for col in ("nome", "latitude", "longitude", "area_ha", "tipo_solo", "moeda_exibicao"):
+            if col in campos:
+                sets.append(f"{col} = %s")
+                params.append(campos[col])
+        params.append(id_propriedade)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 f"""
@@ -80,40 +78,10 @@ def atualizar_propriedade(
             )
             r = cur.fetchone()
         if r is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Propriedade não encontrada")
+            raise HTTPException(status_code=404, detail="Propriedade não encontrada")
         conn.commit()
     for k in ("latitude", "longitude", "area_ha"):
         r[k] = _f(r[k])
-    return r
-
-
-@router.post("/safras", status_code=201)
-def criar_safra(dados: SafraCreate, request: Request, conn=Depends(get_conn)):
-    if dados.data_fim is not None and dados.data_fim < dados.data_inicio:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "data_fim deve ser maior ou igual a data_inicio",
-        )
-    with auditar(request, "criar_safra") as ctx:
-        ctx.detalhe = f"nome={dados.nome}"
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                INSERT INTO safra (nome, data_inicio, data_fim, meta_ton_ha)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (nome) DO UPDATE
-                   SET data_inicio = EXCLUDED.data_inicio,
-                       data_fim = EXCLUDED.data_fim,
-                       meta_ton_ha = EXCLUDED.meta_ton_ha
-                RETURNING id_safra, nome, data_inicio, data_fim, meta_ton_ha
-                """,
-                (dados.nome, dados.data_inicio, dados.data_fim, dados.meta_ton_ha),
-            )
-            r = cur.fetchone()
-        conn.commit()
-    r["meta_ton_ha"] = _f(r["meta_ton_ha"])
-    hoje = date.today()
-    r["ativa"] = r["data_inicio"] <= hoje and (r["data_fim"] is None or r["data_fim"] >= hoje)
     return r
 
 
@@ -151,6 +119,55 @@ def listar_variedades(id_fruta: Optional[int] = None, conn=Depends(get_conn)):
     for r in linhas:
         r["brix_min"] = _f(r["brix_min"])
     return linhas
+
+
+class PadraoQualidadeUpdate(BaseModel):
+    brix_min: Optional[float] = Field(default=None, ge=0.0)
+    calibre_min: Optional[str] = Field(default=None, max_length=60)
+    classe: Optional[str] = Field(default=None, max_length=60)
+
+
+@router.put("/variedades/{id_variedade}/padrao")
+def atualizar_padrao_variedade(
+    id_variedade: int,
+    dados: PadraoQualidadeUpdate,
+    request: Request,
+    conn=Depends(get_conn),
+    user=Depends(require_role(ADMIN, ANALISTA)),
+):
+    campos = dados.model_dump(exclude_unset=True)
+    if not campos:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+    with auditar(request, "atualizar_padrao_qualidade", user["id_usuario"]) as ctx:
+        ctx.detalhe = f"variedade={id_variedade}"
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT 1 FROM variedade WHERE id_variedade = %s", (id_variedade,))
+            if cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Variedade não encontrada")
+            cur.execute(
+                """
+                INSERT INTO padrao_qualidade (fk_variedade_id_variedade, brix_min, calibre_min, classe)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (fk_variedade_id_variedade) DO UPDATE
+                   SET brix_min = COALESCE(%s, padrao_qualidade.brix_min),
+                       calibre_min = COALESCE(%s, padrao_qualidade.calibre_min),
+                       classe = COALESCE(%s, padrao_qualidade.classe)
+                RETURNING fk_variedade_id_variedade AS id_variedade, brix_min, calibre_min, classe
+                """,
+                (
+                    id_variedade,
+                    campos.get("brix_min"),
+                    campos.get("calibre_min"),
+                    campos.get("classe"),
+                    campos.get("brix_min"),
+                    campos.get("calibre_min"),
+                    campos.get("classe"),
+                ),
+            )
+            r = cur.fetchone()
+        conn.commit()
+    r["brix_min"] = _f(r["brix_min"])
+    return r
 
 @router.get("/portos")
 def listar_portos(conn=Depends(get_conn)):
