@@ -1,10 +1,19 @@
 # Termos: https://open-meteo.com/en/features#terms (citar a Open-Meteo na interface).
+import math
 import time
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 import requests
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None
+
 BASE_URL = "https://api.open-meteo.com/v1/forecast"
-_HEADERS = {"User-Agent": "RaizAgroIoT/1.0"}
+MET_NORWAY_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
+_HEADERS = {"User-Agent": "RaizAgroIoT/1.0 (+https://raiz-agro-iot.vercel.app)"}
 
 HOURLY = [
     "temperature_2m",
@@ -130,4 +139,181 @@ def normalizar(bruto: dict) -> dict:
         "unidades_dia": bruto.get("daily_units", {}),
         "horas": _colunas_para_linhas(bruto.get("hourly", {})),
         "dias": dias,
+    }
+
+
+def _resolver_tz(tz_nome: str):
+    if ZoneInfo is not None and tz_nome:
+        try:
+            return ZoneInfo(tz_nome)
+        except Exception:
+            pass
+    # Fallback seguro para America/Recife (UTC-3) se tzdata não estiver instalado
+    return dt_timezone(timedelta(hours=-3))
+
+
+def _symbol_para_wmo(symbol_code: str | None) -> int | None:
+    if not symbol_code:
+        return None
+    base = symbol_code.split("_")[0].lower()
+    if "thunder" in base:
+        return 95
+    if base == "clearsky":
+        return 0
+    if base == "fair":
+        return 1
+    if base == "partlycloudy":
+        return 2
+    if base == "cloudy":
+        return 3
+    if base == "fog":
+        return 45
+    if "snow" in base:
+        return 71
+    if "showers" in base:
+        return 80
+    if base in ("lightrain", "drizzle"):
+        return 51
+    if "rain" in base or "sleet" in base:
+        return 61
+    return 2
+
+
+def _calcular_vpd(temp_c: float | None, rh_pct: float | None) -> float | None:
+    if temp_c is None or rh_pct is None:
+        return None
+    es = 0.6108 * math.exp((17.27 * temp_c) / (temp_c + 237.3))
+    return round(max(0.0, es * (1.0 - (rh_pct / 100.0))), 2)
+
+
+def buscar_previsao_met_norway(latitude: float, longitude: float) -> dict:
+    """Provedor meteorológico secundário oficial (MET Norway, gratuito, sem API key)."""
+    resp = requests.get(
+        MET_NORWAY_URL,
+        params={"lat": round(latitude, 4), "lon": round(longitude, 4)},
+        headers=_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def normalizar_met_norway(bruto: dict, latitude: float, longitude: float, tz_nome: str, dias: int = 3) -> dict:
+    tz = _resolver_tz(tz_nome)
+    series = bruto.get("properties", {}).get("timeseries") or []
+    horas = []
+    por_dia = defaultdict(lambda: {"temps": [], "chuva": 0.0, "tem_chuva": False, "codes": []})
+
+    agora_bloco = None
+    for idx, item in enumerate(series):
+        ts_raw = item.get("time")
+        if not ts_raw:
+            continue
+        dt_utc = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+        dt_local = dt_utc.astimezone(tz)
+        data_str = dt_local.strftime("%Y-%m-%d")
+        hora_str = dt_local.strftime("%Y-%m-%dT%H:%M")
+
+        dados = item.get("data") or {}
+        inst = (dados.get("instant") or {}).get("details") or {}
+        temp = inst.get("air_temperature")
+        umid = inst.get("relative_humidity")
+        vento_ms = inst.get("wind_speed")
+        vento_kmh = round(vento_ms * 3.6, 1) if vento_ms is not None else None
+
+        n1 = dados.get("next_1_hours") or {}
+        n6 = dados.get("next_6_hours") or {}
+        n12 = dados.get("next_12_hours") or {}
+
+        sym = (
+            (n1.get("summary") or {}).get("symbol_code")
+            or (n6.get("summary") or {}).get("symbol_code")
+            or (n12.get("summary") or {}).get("symbol_code")
+        )
+        wmo = _symbol_para_wmo(sym)
+
+        chuva_1h = (n1.get("details") or {}).get("precipitation_amount")
+        chuva_6h = (n6.get("details") or {}).get("precipitation_amount")
+
+        if idx == 0:
+            agora_bloco = {
+                "time": hora_str,
+                "temperature_2m": temp,
+                "relative_humidity_2m": umid,
+                "apparent_temperature": temp,
+                "precipitation": chuva_1h if chuva_1h is not None else (chuva_6h if chuva_6h is not None else 0.0),
+                "weather_code": wmo,
+                "wind_speed_10m": vento_kmh,
+                "uv_index": None,
+                **descrever_codigo(wmo),
+            }
+
+        horas.append({
+            "time": hora_str,
+            "temperature_2m": temp,
+            "relative_humidity_2m": umid,
+            "precipitation_probability": None,
+            "precipitation": chuva_1h if chuva_1h is not None else 0.0,
+            "vapour_pressure_deficit": _calcular_vpd(temp, umid),
+            "et0_fao_evapotranspiration": None,
+            "uv_index": None,
+        })
+
+        bucket = por_dia[data_str]
+        if temp is not None:
+            bucket["temps"].append(temp)
+        if chuva_1h is not None:
+            bucket["chuva"] += float(chuva_1h)
+            bucket["tem_chuva"] = True
+        elif chuva_6h is not None and dt_local.hour in (0, 6, 12, 18):
+            bucket["chuva"] += float(chuva_6h)
+            bucket["tem_chuva"] = True
+        if wmo is not None:
+            bucket["codes"].append(wmo)
+
+    dias_lista = []
+    for data_str in sorted(por_dia.keys())[:dias]:
+        b = por_dia[data_str]
+        wmo_dia = Counter(b["codes"]).most_common(1)[0][0] if b["codes"] else None
+        dias_lista.append({
+            "time": data_str,
+            "weather_code": wmo_dia,
+            "temperature_2m_max": round(max(b["temps"]), 1) if b["temps"] else None,
+            "temperature_2m_min": round(min(b["temps"]), 1) if b["temps"] else None,
+            "precipitation_sum": round(b["chuva"], 2) if b["tem_chuva"] else 0.0,
+            "precipitation_probability_max": None,
+            "uv_index_max": None,
+            "et0_fao_evapotranspiration": None,
+            **descrever_codigo(wmo_dia),
+        })
+
+    datas_validas = {d["time"] for d in dias_lista}
+    horas_filtradas = [h for h in horas if h["time"][:10] in datas_validas]
+
+    return {
+        "fonte": "MET Norway",
+        "origem": "previsao",
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": tz_nome,
+        "agora": agora_bloco,
+        "unidades_agora": {
+            "temperature_2m": "°C",
+            "relative_humidity_2m": "%",
+            "wind_speed_10m": "km/h",
+            "precipitation": "mm",
+        },
+        "unidades_hora": {
+            "temperature_2m": "°C",
+            "relative_humidity_2m": "%",
+            "precipitation": "mm",
+            "vapour_pressure_deficit": "kPa",
+        },
+        "unidades_dia": {
+            "temperature_2m_max": "°C",
+            "temperature_2m_min": "°C",
+            "precipitation_sum": "mm",
+        },
+        "horas": horas_filtradas,
+        "dias": dias_lista,
     }

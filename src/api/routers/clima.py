@@ -87,18 +87,32 @@ def previsao(
     if guardado and agora - guardado[0] < config.CLIMA_CACHE_SEGUNDOS:
         return guardado[1]
 
-    # Se Open-Meteo falhou recentemente (ex.: 429), evita novas chamadas durante o cooldown
+    # Se Open-Meteo falhou recentemente (ex.: 429), tenta MET Norway diretamente durante o cooldown
     ate = _cooldown_ate.get(chave, 0.0)
     if agora < ate:
         if guardado:
             return guardado[1]
-        return _fallback_sensor_local(lat, lon, "Open-Meteo em cooldown após limite de requisições (429)")
+        try:
+            bruto_met = open_meteo_client.buscar_previsao_met_norway(lat, lon)
+            dados_met = open_meteo_client.normalizar_met_norway(bruto_met, lat, lon, config.CLIMA_TIMEZONE, dias)
+            _cache[chave] = (agora, dados_met)
+            return dados_met
+        except requests.RequestException as met_err:
+            logger.warning("[CLIMA] MET Norway indisponível durante cooldown: %s", str(met_err)[:140])
+            return _fallback_sensor_local(lat, lon, "Open-Meteo em cooldown e MET Norway indisponível")
 
     try:
         bruto = open_meteo_client.buscar_previsao(lat, lon, config.CLIMA_TIMEZONE, dias)
     except requests.RequestException as e:
         _cooldown_ate[chave] = agora + _COOLDOWN_ERRO_S
-        logger.warning("[CLIMA] Open-Meteo indisponível (%s); ativando cooldown de %.0fs", str(e)[:150], _COOLDOWN_ERRO_S)
+        logger.warning("[CLIMA] Open-Meteo indisponível (%s); tentando MET Norway", str(e)[:150])
+        try:
+            bruto_met = open_meteo_client.buscar_previsao_met_norway(lat, lon)
+            dados_met = open_meteo_client.normalizar_met_norway(bruto_met, lat, lon, config.CLIMA_TIMEZONE, dias)
+            _cache[chave] = (agora, dados_met)
+            return dados_met
+        except requests.RequestException as met_err:
+            logger.warning("[CLIMA] MET Norway também falhou (%s)", str(met_err)[:140])
         if guardado:  # serve o cache vencido em vez de quebrar o dashboard
             return guardado[1]
         return _fallback_sensor_local(lat, lon, f"Open-Meteo indisponível: {str(e)[:140]}")
