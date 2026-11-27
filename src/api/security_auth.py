@@ -14,7 +14,7 @@ from fastapi import HTTPException, status
 JWT_SECRET = os.environ["JWT_SECRET"]
 EMAIL_OTP_KEY = os.environ["EMAIL_OTP_KEY"]
 JWT_ALG = "HS256"
-ACCESS_MIN = 15      # JWT de acesso
+ACCESS_MIN = int(os.getenv("ACCESS_MIN", "15"))  # JWT de acesso (configurável via env)
 PENDING_MIN = 10     # token temporário do passo 1 (>= validade do código por e-mail)
 REFRESH_DIAS = 7
 

@@ -214,7 +214,13 @@ def _emitir_sessao(conn, user: dict, request: Request, response: Response,
         "token_type": "bearer",
         "expires_in": ACCESS_MIN * 60,
         "deve_trocar_senha": bool(user.get("deve_trocar_senha")),
-}
+        "usuario": {
+            "id_usuario": user["id_usuario"],
+            "nome": user.get("nome"),
+            "email": user.get("email"),
+            "perfil": user["perfil"],
+        },
+    }
 
 
 def _usuario_do_token_temporario(conn, token: str) -> dict:
