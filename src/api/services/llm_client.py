@@ -63,19 +63,25 @@ def _timeout() -> float:
 
 
 def _limpar_json(texto: str) -> dict:
-    texto = texto.strip()
+    texto = (texto or "").strip()
     if texto.startswith("```"):
-        texto = texto.strip("`")
+        texto = texto.strip("`").strip()
         if texto.lower().startswith("json"):
-            texto = texto[4:]
+            texto = texto[4:].strip()
     try:
         return json.loads(texto)
     except json.JSONDecodeError as e:
+        inicio, fim = texto.find("{"), texto.rfind("}")
+        if inicio != -1 and fim > inicio:
+            try:
+                return json.loads(texto[inicio : fim + 1])
+            except json.JSONDecodeError:
+                pass
         raise LLMError(f"Resposta da IA não é JSON válido: {e}") from e
 
 
-def _checar_resposta(r: requests.Response, provedor: str) -> None:
-    """Como raise_for_status, mas com o motivo que o provedor devolveu (sem expor chaves)."""
+def _checar_resposta(r: requests.Response, provedor: str, model: str = "") -> None:
+    """Como raise_for_status, mas com classificação clara do motivo devolvido (sem expor chaves)."""
     if r.ok:
         return
     detalhe = ""
@@ -85,7 +91,33 @@ def _checar_resposta(r: requests.Response, provedor: str) -> None:
         detalhe = erro.get("message") if isinstance(erro, dict) else str(erro)
     except ValueError:
         detalhe = r.text[:200]
-    raise requests.HTTPError(f"{provedor} respondeu {r.status_code}: {detalhe}".strip(), response=r)
+    status = r.status_code
+    if status in (401, 403):
+        motivo = f"{provedor} recusou autenticação ({status} — chave inválida ou sem permissão): {detalhe}".strip()
+    elif status == 404:
+        modelo_txt = f" '{model}'" if model else ""
+        motivo = f"{provedor} respondeu 404 (modelo{modelo_txt} inexistente ou descontinuado): {detalhe}".strip()
+    elif status == 429:
+        motivo = f"{provedor} atingiu limite de requisições/cota (429): {detalhe}".strip()
+    else:
+        motivo = f"{provedor} respondeu {status}: {detalhe}".strip()
+    raise requests.HTTPError(motivo, response=r)
+
+
+def _extrair_texto_gemini(payload: dict) -> str:
+    """Extrai a part de texto principal da resposta do Gemini, ignorando parts de raciocínio (thought)."""
+    try:
+        candidates = payload["candidates"]
+        parts = candidates[0]["content"]["parts"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise LLMError("Resposta inesperada do Gemini (sem candidates/parts).") from e
+    textos = [p["text"] for p in parts if isinstance(p, dict) and not p.get("thought") and isinstance(p.get("text"), str) and p["text"].strip()]
+    if textos:
+        return "\n".join(textos)
+    textos_fallback = [p["text"] for p in parts if isinstance(p, dict) and isinstance(p.get("text"), str) and p["text"].strip()]
+    if textos_fallback:
+        return "\n".join(textos_fallback)
+    raise LLMError("Resposta inesperada do Gemini (sem texto).")
 
 
 def _gemini(system: str, user: str, model: str) -> str:
@@ -104,11 +136,8 @@ def _gemini(system: str, user: str, model: str) -> str:
         json=body,
         timeout=_timeout(),
     )
-    _checar_resposta(r, "Gemini")
-    try:
-        return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError) as e:
-        raise LLMError("Resposta inesperada do Gemini (sem texto).") from e
+    _checar_resposta(r, "Gemini", model)
+    return _extrair_texto_gemini(r.json())
 
 
 def _groq(system: str, user: str, model: str) -> str:
@@ -130,7 +159,7 @@ def _groq(system: str, user: str, model: str) -> str:
         json=body,
         timeout=_timeout(),
     )
-    _checar_resposta(r, "Groq")
+    _checar_resposta(r, "Groq", model)
     try:
         return r.json()["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
@@ -138,7 +167,7 @@ def _groq(system: str, user: str, model: str) -> str:
 
 
 def _ollama(system: str, user: str, model: str) -> str:
-    base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    base = os.environ.get("OLLAMA_URL", "http://localhost:11434").strip().rstrip("/")
     body = {
         "model": model,
         "stream": False,
@@ -151,7 +180,7 @@ def _ollama(system: str, user: str, model: str) -> str:
     }
     # modelo local costuma ser mais lento: nunca menos de 120 s
     r = requests.post(f"{base}/api/chat", json=body, timeout=max(120.0, _timeout()))
-    _checar_resposta(r, "Ollama")
+    _checar_resposta(r, "Ollama", model)
     try:
         return r.json()["message"]["content"]
     except (KeyError, TypeError) as e:
@@ -180,19 +209,30 @@ def _descrever(e: Exception, provedor: str) -> str:
 def gerar_json(system: str, user: str, modelo_override: str | None = None) -> tuple[dict, str]:
     """Chama o provedor configurado e devolve (dict_json, 'provedor:modelo').
 
-    Se PARECER_MODELO estiver definido ou modelo_override for passado, usa exclusivamente
-    esse modelo único. Em caso de instabilidade passageira (429, rede), aplica backoff exponencial.
+    Se PARECER_MODELO estiver definido (não vazio) ou modelo_override for passado, usa
+    exclusivamente esse modelo único. Em caso de instabilidade passageira (429, rede),
+    aplica backoff exponencial.
     """
     provedor = os.environ.get("LLM_PROVIDER", "gemini").lower().strip()
     if provedor not in _PROVEDORES:
-        raise LLMError(f"LLM_PROVIDER inválido: {provedor}")
+        raise LLMError(f"LLM_PROVIDER inválido: '{provedor}'. Esperado: {', '.join(_PROVEDORES)}.")
 
-    modelo_config = (modelo_override or os.environ.get("PARECER_MODELO") or os.environ.get("LLM_MODEL") or "").strip()
-    if not modelo_config and provedor == "gemini":
-        modelo_config = "gemini-2.5-flash"
+    # Validação explícita da chave antes de iniciar retries/esperas
+    if provedor == "gemini" and not os.environ.get("GEMINI_API_KEY", "").strip():
+        raise LLMError("GEMINI_API_KEY não encontrada no ambiente.")
+    if provedor == "groq" and not os.environ.get("GROQ_API_KEY", "").strip():
+        raise LLMError("GROQ_API_KEY não encontrada no ambiente.")
 
-    # Se configurado modelo único ou override, não tenta modelos de reserva
-    if modelo_override or os.environ.get("PARECER_MODELO"):
+    parecer_modelo = os.environ.get("PARECER_MODELO", "").strip()
+    modelo_config = ((modelo_override or "").strip() or parecer_modelo or os.environ.get("LLM_MODEL", "").strip())
+    if not modelo_config:
+        if provedor == "gemini":
+            modelo_config = "gemini-2.5-flash"
+        else:
+            raise LLMError(f"Modelo não configurado para provedor '{provedor}' (defina LLM_MODEL).")
+
+    # Se configurado modelo único (não vazio) ou override, não tenta modelos de reserva
+    if (modelo_override or "").strip() or parecer_modelo:
         modelos = [modelo_config]
     else:
         principal = modelo_config
@@ -212,6 +252,19 @@ def gerar_json(system: str, user: str, modelo_override: str | None = None) -> tu
                 return _limpar_json(bruto), f"{provedor}:{model}"
             except LLMError:
                 raise                           # chave ausente, resposta inválida: repetir não ajuda
+            except requests.HTTPError as e:
+                ultimo_erro = e
+                status = e.response.status_code if e.response is not None else None
+                if status in (401, 403):
+                    # Chave inválida ou sem permissão: falhar imediatamente sem tentar outros modelos
+                    raise LLMError(f"Erro de autenticação no {provedor}: {e}") from e
+                if _vale_repetir(e) and n < tentativas:
+                    delay = espera * (2 ** (n - 1))
+                    logger.warning("[LLM] Falha transitória (%s). Tentativa %d/%d com backoff de %.1fs",
+                                   str(e)[:150], n, tentativas, delay)
+                    time.sleep(delay)
+                    continue
+                break                           # 404 (modelo inválido) ou esgotou tentativas: próximo modelo
             except Exception as e:
                 ultimo_erro = e
                 if _vale_repetir(e) and n < tentativas:
@@ -220,7 +273,7 @@ def gerar_json(system: str, user: str, modelo_override: str | None = None) -> tu
                                    str(e)[:150], n, tentativas, delay)
                     time.sleep(delay)
                     continue
-                break                           # esgotou as tentativas ou erro do modelo (ex.: 404): próximo modelo
+                break
 
     raise LLMError(f"Falha ao chamar {provedor} (modelos tentados: {', '.join(modelos)}): "
                    f"{_descrever(ultimo_erro, provedor)}") from ultimo_erro

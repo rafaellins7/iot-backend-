@@ -32,6 +32,16 @@ def _ttl_min() -> int:
                 pass
     return 60
 
+
+def _fallback_ttl_min() -> int:
+    val = os.getenv("PARECER_FALLBACK_TTL_MIN")
+    if val:
+        try:
+            return max(1, int(val))
+        except ValueError:
+            pass
+    return 10
+
 TTL_MIN = _ttl_min()
 JANELA_ANALISE_DIAS = 7
 _LOCK_NS = 7301  # namespace do advisory lock (um por lote)
@@ -169,7 +179,7 @@ def obter_parecer(id_lote: int = Query(..., ge=1), conn=Depends(get_conn), user=
             return _resposta(novo, "SEM_DADOS")
 
         conteudo, modelo, usou_fallback = gerar_parecer(snapshot)
-        ttl = _ttl_min()
+        ttl = _fallback_ttl_min() if usou_fallback else _ttl_min()
         origem = "FALLBACK_TEMPLATE" if usou_fallback else "IA"
         cur.execute(
             """INSERT INTO parecer_ia (id_lote, modelo, snapshot_entrada, conteudo_json, data_expiracao)
