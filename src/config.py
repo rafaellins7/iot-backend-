@@ -6,15 +6,13 @@ load_dotenv()
 THINGSPEAK_CHANNEL_ID = os.getenv("THINGSPEAK_CHANNEL_ID", "")
 THINGSPEAK_READ_API_KEY = os.getenv("THINGSPEAK_READ_API_KEY", "")
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "20"))
-# Liga/desliga a coleta ThingSpeak dentro da API (lifespan do FastAPI). Nos testes fica false.
-COLETA_AUTOMATICA = os.getenv("COLETA_AUTOMATICA", "true").strip().lower() in ("1", "true", "sim", "yes")
 
+DATABASE_URL = os.getenv("DATABASE_URL")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
-DATABASE_URL = os.getenv("DATABASE_URL")
 SENSOR_ID = int(os.getenv("SENSOR_ID", "1"))
 
 # Open-Meteo 
@@ -23,10 +21,10 @@ CLIMA_LONGITUDE = os.getenv("CLIMA_LONGITUDE")
 CLIMA_TIMEZONE = os.getenv("CLIMA_TIMEZONE", "America/Recife")
 CLIMA_CACHE_SEGUNDOS = int(os.getenv("CLIMA_CACHE_SEGUNDOS", "600"))
 
-# Origens liberadas no CORS (o Vite muda de porta: 5173 e 5174)
+# Origens liberadas no CORS (o Vite muda de porta: 5173 e 5174, e deploy na Vercel)
 CORS_ORIGINS = [o.strip() for o in os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
+    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,https://raiz-agro-iot.vercel.app",
 ).split(",") if o.strip()]
 
 # Valores fora delas vão para o log de leituras rejeitadas 
@@ -35,8 +33,9 @@ TEMP_MAX_VALIDA = float(os.getenv("TEMP_MAX_VALIDA", "80"))
 UMIDADE_MIN_VALIDA = float(os.getenv("UMIDADE_MIN_VALIDA", "0"))
 UMIDADE_MAX_VALIDA = float(os.getenv("UMIDADE_MAX_VALIDA", "100")) 
 
-SOLO_RAW_SECO = float(os.getenv("SOLO_RAW_SECO", "3000"))
-SOLO_RAW_MOLHADO = float(os.getenv("SOLO_RAW_MOLHADO", "1200"))
+SOLO_RAW_SECO = float(os.getenv("SOLO_RAW_SECO", "960"))
+SOLO_RAW_MOLHADO = float(os.getenv("SOLO_RAW_MOLHADO", "800"))
+SOLO_RAW_TOLERANCIA = float(os.getenv("SOLO_RAW_TOLERANCIA", "60"))
 
 # Número do field do ThingSpeak em que cada medida chega. Os de solo são opcionais: vazio = não coleta.
 def _campo_opcional(nome):

@@ -1,7 +1,9 @@
 # Por padrão: field1 = temperatura, field2 = umidade (configurável em TS_FIELD_* no .env).
+import logging
 import requests
 from src import config
 
+logger = logging.getLogger(__name__)
 BASE_URL = "https://api.thingspeak.com"
 
 
@@ -46,15 +48,17 @@ def _campo(feed, numero):
 
 
 def _raw_para_pct(raw):
-    """Converte a leitura bruta do ADC (0-4095) do sensor de solo em % de umidade.
+    """Converte a leitura bruta do ADC do sensor de solo em % de umidade.
     Sensor capacitivo: quanto mais seco, maior o valor bruto.
-    Se o valor já estiver na escala de porcentagem (< 100 e abaixo do range ADC), preserva."""
+    Descarta (retorna None) se bruto for None ou estiver fora de [MOLHADO - TOLERANCIA, SECO + TOLERANCIA]."""
     if raw is None:
         return None
-    if 0.0 <= raw <= 100.0 and (raw < config.SOLO_RAW_MOLHADO):
-        return round(float(raw), 1)
-    seco, molhado = config.SOLO_RAW_SECO, config.SOLO_RAW_MOLHADO
+    seco = config.SOLO_RAW_SECO
+    molhado = config.SOLO_RAW_MOLHADO
+    tolerancia = config.SOLO_RAW_TOLERANCIA
     if seco == molhado:
+        return None
+    if raw > seco + tolerancia or raw < molhado - tolerancia:
         return None
     pct = (seco - raw) / (seco - molhado) * 100
     return round(max(0.0, min(100.0, pct)), 1)
@@ -62,7 +66,7 @@ def _raw_para_pct(raw):
 
 def _montar_leitura(feed):
     """Converte um feed do ThingSpeak no dicionário usado pelo resto do sistema.
-    Os números dos fields vêm do .env (TS_FIELD_*). Solo só entra se estiver mapeado."""
+    Os números dos fields vêm do .env (TS_FIELD_*). Solo só entra se estiver mapeado e dentro da faixa válida."""
     leitura = {
         "entry_id": feed["entry_id"],
         "created_at": feed["created_at"],
@@ -74,8 +78,18 @@ def _montar_leitura(feed):
     }
     if config.TS_FIELD_UMIDADE_SOLO:
         bruto = _campo(feed, config.TS_FIELD_UMIDADE_SOLO)
-        leitura["umidade_solo"] = _raw_para_pct(_float_seguro(bruto))
-        leitura["umidade_solo_bruta"] = bruto
+        pct_solo = _raw_para_pct(_float_seguro(bruto))
+        if pct_solo is None:
+            logger.warning(
+                "[SOLO] Leitura de umidade do solo descartada: bruto=%r entry_id=%s (faixa aceita: %.1f a %.1f)",
+                bruto,
+                feed.get("entry_id"),
+                config.SOLO_RAW_MOLHADO - config.SOLO_RAW_TOLERANCIA,
+                config.SOLO_RAW_SECO + config.SOLO_RAW_TOLERANCIA,
+            )
+        else:
+            leitura["umidade_solo"] = pct_solo
+            leitura["umidade_solo_bruta"] = bruto
     if config.TS_FIELD_TEMPERATURA_SOLO:
         leitura["temperatura_solo"] = _float_seguro(_campo(feed, config.TS_FIELD_TEMPERATURA_SOLO))
         leitura["temperatura_solo_bruta"] = _campo(feed, config.TS_FIELD_TEMPERATURA_SOLO)
