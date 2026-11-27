@@ -24,3 +24,5 @@ qa-api/reports/
 
 # logs de segurança (evidência vai copiada para seguranca/evidencias/)
 *.log
+.vercel
+.env*
