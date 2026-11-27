@@ -2,6 +2,8 @@
 A tabela relatorio guarda só os metadados; o conteúdo é recalculado a partir de
 tipo + período + parametros """
 
+import threading
+import time
 import csv
 import io
 from datetime import date, datetime, timedelta
@@ -15,6 +17,8 @@ from pydantic import BaseModel, Field
 
 from src.api.auditoria import auditar
 from src.api.deps import get_conn
+from src.api.deps_auth import get_current_user
+from src.api.email_service import enviar_relatorio
 from src.api.filtros import clausula
 from src.api.routers.relatorios import _LEITURAS_AVALIADAS, _UNIDADE_TRUNC
 
@@ -226,3 +230,60 @@ def exportar_csv(id_relatorio: int, request: Request, conn=Depends(get_conn)):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="relatorio_{id_relatorio}_{meta["tipo"]}.csv"'},
     )
+
+# ------------------------------------------------------------------ envio por e-mail
+_ULTIMO_ENVIO = {}  # id do usuário -> instante do último envio (memória do processo)
+_TRAVA_ENVIO = threading.Lock()
+_INTERVALO_ENVIO_S = 60
+
+
+def _id_do_usuario(user):
+    for chave in ("id_usuario", "id"):
+        if user.get(chave) is not None:
+            return user[chave]
+    return None
+
+
+def _csv_bytes(tipo: str, linhas: List[dict]) -> bytes:
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=COLUNAS[tipo], delimiter=";", extrasaction="ignore")
+    w.writeheader()
+    w.writerows(linhas)
+    return buf.getvalue().encode("utf-8-sig")
+
+
+@router.post("/{id_relatorio:int}/enviar-email")
+def enviar_relatorio_por_email(id_relatorio: int, request: Request,
+                               conn=Depends(get_conn), user=Depends(get_current_user)):
+    uid = _id_do_usuario(user)
+    email = user.get("email")
+    if uid is None or not email:
+        raise HTTPException(status_code=400, detail="Usuário sem e-mail cadastrado")
+
+    with auditar(request, "enviar relatorio email") as ctx:
+        ctx.id_usuario = uid
+        ctx.detalhe = f"id={id_relatorio}"
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            meta = _buscar_meta(cur, id_relatorio)
+            dono = meta.get("id_usuario")
+            if dono is not None and str(dono) != str(uid):
+                raise HTTPException(status_code=404, detail="Relatório não encontrado")
+
+            agora = time.monotonic()
+            with _TRAVA_ENVIO:
+                ultimo = _ULTIMO_ENVIO.get(uid)
+                if ultimo is not None and agora - ultimo < _INTERVALO_ENVIO_S:
+                    raise HTTPException(status_code=429, detail="Aguarde 1 minuto para pedir outro envio.")
+                _ULTIMO_ENVIO[uid] = agora
+
+            linhas = _gerar_dados(cur, meta)
+
+        titulo = meta.get("descricao") or f"{meta['tipo']} de {meta['inicio']} a {meta['fim']}"
+        nome_arquivo = f"relatorio_{id_relatorio}_{meta['tipo']}.csv"
+        try:
+            enviar_relatorio(email, user.get("nome") or "usuário", titulo,
+                             _csv_bytes(meta["tipo"], linhas), nome_arquivo)
+        except Exception:
+            raise HTTPException(status_code=502,
+                                detail="Não foi possível enviar o e-mail agora. Tente novamente mais tarde.")
+    return {"enviado": True}

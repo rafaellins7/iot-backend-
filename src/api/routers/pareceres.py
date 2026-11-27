@@ -237,50 +237,128 @@ class AssinarIn(BaseModel):
     crea: str = Field(..., min_length=5, max_length=40)
 
 
+def executar_geracao_parecer(
+    conn,
+    id_lote: int,
+    tipo: Literal["agronomico", "fisiologico"] = "agronomico",
+    dias: int = 30,
+    forcar: bool = False,
+    user=None,
+    request: Optional[Request] = None,
+) -> dict:
+    """Executa a geração do parecer de forma segura, com verificação de hash e lock anti-duplicação.
+    Reaproveitada tanto pelo endpoint manual (Produtor/Analista) quanto pelo agendador automático."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        # 1. Verifica se já está em geração recente (< 5 min) para evitar duplicações simultâneas
+        cur.execute(
+            """SELECT * FROM parecer_agronomico
+               WHERE fk_lote_id_lote = %s AND em_geracao = TRUE
+                 AND gerado_em >= (now() AT TIME ZONE 'UTC') - interval '5 minutes'
+               ORDER BY gerado_em DESC LIMIT 1""",
+            (id_lote,),
+        )
+        em_curso = cur.fetchone()
+        if em_curso:
+            conn.commit()
+            return {**_formatar(em_curso), "reaproveitado": True, "gerando": True}
+
+        # 2. Coleta dados e calcula o hash das entradas
+        dados = coletar_dados(cur, id_lote, tipo, dias)
+        h = _hash(dados)
+
+        # 3. Se não forçar, verifica se já existe parecer finalizado com sucesso para este mesmo hash
+        if not forcar:
+            cur.execute(
+                """SELECT * FROM parecer_agronomico
+                   WHERE fk_lote_id_lote = %s AND tipo = %s AND hash_entrada = %s
+                     AND em_geracao = FALSE AND erro_geracao IS NULL
+                     AND status IN ('rascunho', 'assinado')
+                   ORDER BY gerado_em DESC LIMIT 1""",
+                (id_lote, tipo, h),
+            )
+            ja = cur.fetchone()
+            if ja:
+                conn.commit()
+                return {**_formatar(ja), "reaproveitado": True, "gerando": False}
+
+        # 4. Cria registro preliminar com em_geracao = True (satisfazendo check constraints do banco)
+        cur.execute(
+            """INSERT INTO parecer_agronomico
+                   (fk_lote_id_lote, tipo, texto_gerado, texto_final, dados_entrada,
+                    hash_entrada, origem_texto, status, em_geracao, fk_gerado_por, gerado_em)
+               VALUES (%s, %s, '', '', %s, %s, 'llm', 'rascunho', TRUE, %s, (now() AT TIME ZONE 'UTC'))
+               RETURNING *""",
+            (id_lote, tipo, Json(dados), h, _uid(user)),
+        )
+        rec_gerando = cur.fetchone()
+        id_parecer = rec_gerando["id_parecer"]
+    conn.commit()  # commit imediato para que qualquer outra requisição concorrente veja em_geracao=True
+
+    # 5. Executa a chamada à IA (ou fallback determinístico de template)
+    provedor, origem = None, "llm"
+    erro_msg = None
+    texto = ""
+    try:
+        saida, provedor = gerar_json(SYSTEM_PROMPT, montar_prompt_usuario(dados))
+        secoes = validar_saida(saida, tipo)
+        texto = secoes_para_texto(secoes)
+    except (LLMError, ValueError) as e:
+        log.warning("IA indisponível ou resposta inválida (%s); usando template", e)
+        try:
+            secoes = parecer_template(dados)
+            origem, provedor = "template", None
+            texto = secoes_para_texto(secoes)
+        except Exception as e2:
+            log.error("Erro fatal no fallback: %s", e2)
+            erro_msg = str(e)
+    except Exception as e:
+        log.error("Erro inesperado na chamada ao modelo: %s", e)
+        try:
+            secoes = parecer_template(dados)
+            origem, provedor = "template", None
+            texto = secoes_para_texto(secoes)
+        except Exception as e2:
+            erro_msg = str(e)
+
+    # 6. Atualiza o registro com o resultado final
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        if erro_msg:
+            cur.execute(
+                """UPDATE parecer_agronomico
+                   SET em_geracao = FALSE, erro_geracao = %s
+                   WHERE id_parecer = %s RETURNING *""",
+                (erro_msg[:500], id_parecer),
+            )
+        else:
+            cur.execute(
+                """UPDATE parecer_agronomico
+                   SET em_geracao = FALSE, texto_gerado = %s, texto_final = %s,
+                       origem_texto = %s, provedor_modelo = %s,
+                       fk_modelo_id_modelo = %s, erro_geracao = NULL
+                   WHERE id_parecer = %s RETURNING *""",
+                (texto, texto, origem, provedor, _id_modelo(cur, provedor), id_parecer),
+            )
+        final = cur.fetchone()
+        if request and user:
+            _auditar(cur, request, user, "parecer_gerar", f"lote={id_lote} origem={origem}")
+    conn.commit()
+    return {**_formatar(final), "reaproveitado": False, "gerando": False}
+
+
 @router.post("/gerar")
 def gerar(body: GerarIn, request: Request, conn=Depends(get_conn),
           user=Depends(get_current_user)):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        dados = coletar_dados(cur, body.id_lote, body.tipo, body.dias)
-        h = _hash(dados)
-        if not body.forcar:
-            cur.execute(
-                """SELECT * FROM parecer_agronomico
-                   WHERE fk_lote_id_lote = %s AND tipo = %s AND hash_entrada = %s
-                     AND status = 'rascunho' ORDER BY gerado_em DESC LIMIT 1""",
-                (body.id_lote, body.tipo, h))
-            ja = cur.fetchone()
-            if ja:
-                conn.commit()
-                return {**_formatar(ja), "reaproveitado": True}
-    conn.commit()   # encerra a transação de leitura antes de chamar a IA
-
-    provedor, origem = None, "llm"
-    try:
-        saida, provedor = gerar_json(SYSTEM_PROMPT, montar_prompt_usuario(dados))
-        secoes = validar_saida(saida, body.tipo)
-    except (LLMError, ValueError) as e:
-        log.warning("IA indisponível ou resposta inválida (%s); usando template", e)
-        secoes, origem, provedor = parecer_template(dados), "template", None
-    texto = secoes_para_texto(secoes)
-
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """INSERT INTO parecer_agronomico
-                       (fk_lote_id_lote, tipo, texto_gerado, texto_final, dados_entrada,
-                        hash_entrada, origem_texto, provedor_modelo, fk_modelo_id_modelo,
-                        fk_gerado_por)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-                (body.id_lote, body.tipo, texto, texto, Json(dados), h, origem, provedor,
-                 _id_modelo(cur, provedor), _uid(user)))
-            novo = cur.fetchone()
-            _auditar(cur, request, user, "parecer_gerar", f"lote={body.id_lote} origem={origem}")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    return {**_formatar(novo), "reaproveitado": False}
+        exigir_lote(cur, user, body.id_lote)  # 404 se o lote não existir OU for de outro dono
+    return executar_geracao_parecer(
+        conn=conn,
+        id_lote=body.id_lote,
+        tipo=body.tipo,
+        dias=body.dias,
+        forcar=body.forcar,
+        user=user,
+        request=request,
+    )
 
 
 @router.get("")
@@ -288,11 +366,28 @@ def listar(id_lote: int, conn=Depends(get_conn), user=Depends(get_current_user))
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         exigir_lote(cur, user, id_lote)  # 404 se o lote não existir OU for de outro dono
         cur.execute(
-            """SELECT id_parecer, tipo, status, origem_texto, gerado_em, assinado_em,
-                      assinante_nome, crea
+            """SELECT id_parecer, fk_lote_id_lote, tipo, status, origem_texto, gerado_em,
+                      assinado_em, assinante_nome, crea, em_geracao, erro_geracao, hash_entrada,
+                      texto_final, texto_gerado
                FROM parecer_agronomico WHERE fk_lote_id_lote = %s
                ORDER BY gerado_em DESC""", (id_lote,))
         return [_formatar(r) for r in cur.fetchall()]
+
+
+@router.get("/lote/{id_lote}/ultimo")
+def obter_ultimo_por_lote(id_lote: int, conn=Depends(get_conn), user=Depends(get_current_user)):
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        exigir_lote(cur, user, id_lote)
+        cur.execute(
+            """SELECT * FROM parecer_agronomico
+               WHERE fk_lote_id_lote = %s
+               ORDER BY gerado_em DESC LIMIT 1""",
+            (id_lote,),
+        )
+        r = cur.fetchone()
+    if not r:
+        return None
+    return _formatar(r)
 
 
 @router.get("/{id_parecer}")

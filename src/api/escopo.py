@@ -14,9 +14,18 @@ from typing import Optional
 
 from fastapi import HTTPException
 
+from . import seguranca_log
 from .deps_auth import ADMIN, ANALISTA
 
 PERFIS_ESCOPO_TOTAL = {ADMIN.lower(), ANALISTA.lower()}
+
+
+def nao_encontrado(user, recurso: str, ident, mensagem: str) -> HTTPException:
+    """404 para recurso inexistente OU de outro dono (indistinguíveis). Loga a tentativa de IDOR
+    quando o usuário tem escopo restrito (com o código de missão)."""
+    if id_dono(user) is not None:
+        seguranca_log.bloqueio("IDOR", f"acesso_a_{recurso}_de_outro_dono_ou_inexistente", user["id_usuario"], id_solicitado=ident)
+    return HTTPException(status_code=404, detail=mensagem)
 
 
 def id_dono(user) -> Optional[int]:
@@ -53,7 +62,7 @@ def _exigir(cur, user, tabela: str, coluna_id: str, valor: Optional[int], mensag
         params.append(dono)
     cur.execute(sql, params)
     if cur.fetchone() is None:
-        raise HTTPException(status_code=404, detail=mensagem)
+        raise nao_encontrado(user, tabela, valor, mensagem)
 
 
 def exigir_sensor(cur, user, id_sensor: Optional[int]) -> None:

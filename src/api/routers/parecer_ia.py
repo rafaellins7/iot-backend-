@@ -22,8 +22,17 @@ from src.api.services.ia_service import gerar_parecer
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ia/parecer", tags=["ia"])
 
-TTL_MIN = int(os.getenv("PARECER_TTL_MIN", "60"))
-TTL_FALLBACK_MIN = int(os.getenv("PARECER_FALLBACK_TTL_MIN", "10"))  # texto de reserva vence mais cedo
+def _ttl_min() -> int:
+    for var in ("PARECER_TTL_MINUTOS", "PARECER_TTL_MIN"):
+        val = os.getenv(var)
+        if val:
+            try:
+                return max(1, int(val))
+            except ValueError:
+                pass
+    return 60
+
+TTL_MIN = _ttl_min()
 JANELA_ANALISE_DIAS = 7
 _LOCK_NS = 7301  # namespace do advisory lock (um por lote)
 
@@ -47,16 +56,19 @@ def _montar_snapshot(cur, lote: dict) -> dict:
         {"l": id_lote},
     )
     leituras = cur.fetchall()
-    ar = [r for r in leituras if r["ambiente"] != "solo" and r["temperatura"] is not None and r["umidade"] is not None]
+    ar = [r for r in leituras if str(r["ambiente"]).lower() != "solo" and r["temperatura"] is not None and r["umidade"] is not None]
     solo = [_f(r["umidade_solo"] if r["umidade_solo"] is not None else r["umidade"])
-            for r in leituras if r["ambiente"] == "solo"]
+            for r in leituras if str(r["ambiente"]).lower() == "solo"]
     solo = [v for v in solo if v is not None]
     vpds = [calc.vpd_kpa(float(r["temperatura"]), float(r["umidade"])) for r in ar]
 
-    try:
-        horas = repo.horas_fora_da_faixa(cur, lote["id_fruta"], lote["etapa"], JANELA_ANALISE_DIAS)
-    except TypeError:  # leitura sem temperatura no meio da sequência
+    if not ar:
         horas = None
+    else:
+        try:
+            horas = repo.horas_fora_da_faixa(cur, lote["id_fruta"], lote["etapa"], JANELA_ANALISE_DIAS, id_lote=id_lote)
+        except (TypeError, Exception):  # leitura sem temperatura no meio da sequência
+            horas = None
 
     cur.execute("""SELECT prejuizo_estimado FROM previsao_prejuizo
                    WHERE fk_lote_id_lote = %s ORDER BY data_previsao DESC LIMIT 1""", (id_lote,))
@@ -89,7 +101,8 @@ def _resposta(row: dict, origem: str) -> dict | None:
         conteudo = ParecerEstruturadoSchema(**row["conteudo_json"])
     except Exception:  # linha antiga/mal formada: trata como se não existisse
         return None
-    return {"id_lote": row["id_lote"], "modelo": row["modelo"], "origem": origem,
+    resp_origem = "SEM_DADOS" if row.get("modelo") == "sem-dados" else origem
+    return {"id_lote": row["id_lote"], "modelo": row["modelo"], "origem": resp_origem,
             "conteudo": conteudo, "data_geracao": row["data_geracao"], "expira_em": row["data_expiracao"]}
 
 
@@ -132,8 +145,32 @@ def obter_parecer(id_lote: int = Query(..., ge=1), conn=Depends(get_conn), user=
             return valido
 
         snapshot = _montar_snapshot(cur, lotes[0])
+
+        # Se não há leituras atmosféricas reais na janela, não chama o modelo (origem SEM_DADOS)
+        if snapshot["n_leituras_ar"] == 0:
+            conteudo = {
+                "parecer_agronomico": "Lote sem sensor ou sem leituras nas últimas 24 h.",
+                "parecer_fisiologico": "sem dados suficientes",
+                "recomendacoes": ["sem dados suficientes"],
+                "nivel_confianca": "BAIXO",
+                "limitacoes": ["Lote sem sensor ou sem leituras nas últimas 24 h."],
+            }
+            modelo = "sem-dados"
+            ttl = _ttl_min()
+            cur.execute(
+                """INSERT INTO parecer_ia (id_lote, modelo, snapshot_entrada, conteudo_json, data_expiracao)
+                   VALUES (%s, %s, %s, %s, now() + make_interval(mins => %s))
+                   RETURNING id_lote, modelo, conteudo_json, data_geracao, data_expiracao""",
+                (id_lote, modelo, Json(snapshot), Json(conteudo), ttl),
+            )
+            novo = cur.fetchone()
+            conn.commit()
+            logger.info("[PARECER] Gerado: lote=%s, modelo=%s, origem=SEM_DADOS", id_lote, modelo)
+            return _resposta(novo, "SEM_DADOS")
+
         conteudo, modelo, usou_fallback = gerar_parecer(snapshot)
-        ttl = TTL_FALLBACK_MIN if usou_fallback else TTL_MIN
+        ttl = _ttl_min()
+        origem = "FALLBACK_TEMPLATE" if usou_fallback else "IA"
         cur.execute(
             """INSERT INTO parecer_ia (id_lote, modelo, snapshot_entrada, conteudo_json, data_expiracao)
                VALUES (%s, %s, %s, %s, now() + make_interval(mins => %s))
@@ -141,5 +178,6 @@ def obter_parecer(id_lote: int = Query(..., ge=1), conn=Depends(get_conn), user=
             (id_lote, modelo, Json(snapshot), Json(conteudo), ttl),
         )
         novo = cur.fetchone()
+        logger.info("[PARECER] Gerado: lote=%s, modelo=%s, origem=%s", id_lote, modelo, origem)
     conn.commit()
-    return _resposta(novo, "FALLBACK_TEMPLATE" if usou_fallback else "IA")
+    return _resposta(novo, origem)

@@ -3,12 +3,15 @@ from src import config, validacao
 
 
 def conectar():
+    if config.DATABASE_URL:
+        return psycopg2.connect(config.DATABASE_URL)
     return psycopg2.connect(
         host=config.DB_HOST,
         port=config.DB_PORT,
         dbname=config.DB_NAME,
         user=config.DB_USER,
         password=config.DB_PASSWORD,
+        url=config.DATABASE_URL
     )
 
 
@@ -75,7 +78,14 @@ def processar_leitura(leitura: dict, sensor_id: int = None) -> str:
     if motivos:
         registrar_leitura_rejeitada(leitura, "; ".join(motivos), sensor_id)
         return "rejeitada"
-    return "gravada" if inserir_leitura(leitura, sensor_id) else "duplicada"
+    if inserir_leitura(leitura, sensor_id):
+        try:
+            from src.api.services import parecer_auto
+            parecer_auto.agendar_por_sensor(sensor_id or config.SENSOR_ID)
+        except Exception:
+            pass
+        return "gravada"
+    return "duplicada"
 
 import inspect
 

@@ -1,6 +1,5 @@
 import asyncio
 import json
-import random
 import secrets
 import threading
 import time
@@ -49,11 +48,6 @@ def consumir_ticket(ticket: str) -> bool:
     return dados is not None and dados[0] >= time.monotonic()
 
 
-# Base da simulação (fallback)
-TEMP_BASE = 27.2
-UMID_BASE = 61.0
-
-
 def buscar_ultima_leitura():
     """Última leitura real (ThingSpeak) com temperatura e umidade preenchidas."""
     conn = database.conectar()
@@ -83,15 +77,8 @@ def buscar_ultima_leitura():
     }
 
 
-def leitura_simulada():
-    return {
-        "temperatura": round(TEMP_BASE + random.uniform(-0.3, 0.3), 1),
-        "umidade": round(UMID_BASE + random.uniform(-0.8, 0.8), 1),
-    }
-
-
 def montar_payload():
-    """Tenta dado real; se não houver ou estiver velho, simula."""
+    """Retorna a última leitura real do banco COM a data dela, ou status 'sem_dados'. NUNCA simula."""
     agora = datetime.now(timezone.utc)
     real = None
     try:
@@ -103,21 +90,25 @@ def montar_payload():
         dh = real["data_hora"]
         if dh.tzinfo is None:
             dh = dh.replace(tzinfo=timezone.utc)
-        if agora - dh <= LEITURA_VELHA:
-            return {
-                "temperatura": real["temperatura"],
-                "umidade": real["umidade"],
-                "origem": "real",
-                "timestamp": dh.isoformat(),
-                "sensor": real.get("sensor") or "Sensor",
-            }
+        recente = (agora - dh <= LEITURA_VELHA)
+        return {
+            "temperatura": real["temperatura"],
+            "umidade": real["umidade"],
+            "origem": "real",
+            "timestamp": dh.isoformat(),
+            "sensor": real.get("sensor") or "DHT11 ESP32-C3",
+            "status": "online" if recente else "offline",
+            "recente": recente,
+        }
 
-    sim = leitura_simulada()
     return {
-        **sim,
-        "origem": "simulado",
-        "timestamp": agora.isoformat(),
-        "sensor": "DHT11 ESP32-C3 (simulado)",
+        "status": "sem_dados",
+        "origem": "sem_dados",
+        "temperatura": None,
+        "umidade": None,
+        "timestamp": None,
+        "sensor": None,
+        "recente": False,
     }
 
 
@@ -143,10 +134,9 @@ async def _fluxo(request: Request):
 
         payload = await run_in_threadpool(montar_payload)
 
-        # Real só é reenviado se mudou (ThingSpeak atualiza a cada ~15 s).
-        # Simulado sempre é enviado, para o gráfico "respirar".
-        chave = (payload["origem"], payload["timestamp"])
-        if payload["origem"] == "simulado" or chave != ultimo_envio:
+        # Envia apenas quando o payload mudar ou no heartbeat
+        chave = (payload.get("status"), payload.get("origem"), payload.get("timestamp"))
+        if chave != ultimo_envio:
             yield f"data: {json.dumps(payload)}\n\n"
             ultimo_envio = chave
             ultima_msg = loop.time()

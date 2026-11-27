@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from psycopg2.extras import RealDictCursor
 
+from . import seguranca_log
 from .deps import get_conn
 from .security_auth import decodificar
 
@@ -65,6 +66,7 @@ def require_role(*perfis: str):
     def dependencia(user=Depends(get_current_user)):
         if _eh_admin(user) or user["perfil"].lower() in permitidos:
             return user
+        seguranca_log.bloqueio("IDOR", "perfil_sem_permissao_no_recurso", user["id_usuario"], perfil=user["perfil"])
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Perfil sem permissão para este recurso")
 
     return dependencia
@@ -94,6 +96,8 @@ def require_role_por_metodo(*, leitura: tuple, escrita: tuple, exclusao: tuple |
             permitidos = por_tipo["escrita"]
         if _eh_admin(user) or user["perfil"].lower() in permitidos:
             return user
+        seguranca_log.bloqueio("IDOR", "perfil_sem_permissao_para_o_metodo", user["id_usuario"],
+                               metodo=request.method, rota=request.url.path)
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Perfil sem permissão para este recurso")
 
     return dependencia

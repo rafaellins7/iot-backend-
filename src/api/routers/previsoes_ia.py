@@ -94,7 +94,7 @@ def gerar_prejuizo(
                         raise ValueError(f"sem parametro_prejuizo {'aprovado ' if not incluir_nao_aprovados else ''}"
                                          f"para o nível '{nivel}'")
                     horas = horas_fora_faixa if horas_fora_faixa is not None else \
-                        repo.horas_fora_da_faixa(cur, lote["id_fruta"], lote["etapa"], par["periodo_analise_dias"])
+                        repo.horas_fora_da_faixa(cur, lote["id_fruta"], lote["etapa"], par["periodo_analise_dias"], id_lote=lote["id_lote"])
                     if horas is None:
                         raise ValueError("sem config_parametro da fruta/etapa ou sem leituras no período")
                     preco = preco_kg or repo.preco_kg_atual(cur, lote["id_fruta"], par["validade_preco_dias"])

@@ -1,0 +1,22 @@
+# idor  |  missão K7Q2M9  |  2026-11-23 09:30:11  |  API http://127.0.0.1:8000
+
+== Dono continua usando o que é dele (A=3, sensor 4; B=4, sensor 5)
+[OK ] A lê o próprio sensor 4 -> 200
+[OK ] B lê o próprio sensor 5 -> 200
+
+== A tenta usar o sensor 5 e o lote 147 de B trocando o ID
+[PASSOU (vulnerável)] GET /sensores/5 (ler sensor) -> 200
+[PASSOU (vulnerável)] GET /sensores/5/leituras?periodo=24h (ler leituras agregadas) -> 200
+[PASSOU (vulnerável)] GET /leituras?id_sensor=5 (listar leituras) -> 200
+[BLOQUEADO] GET /leituras/ultima?id_sensor=5 (última leitura) -> 404
+[PASSOU (vulnerável)] GET /leituras/estatisticas?id_sensor=5 (estatísticas) -> 200
+[PASSOU (vulnerável)] GET /leituras-rejeitadas?id_sensor=5 (leituras rejeitadas) -> 200
+[PASSOU (vulnerável)] GET /lotes/147 (ler lote) -> 200
+[BLOQUEADO] PUT /sensores/5 (alterar configuração) -> 403
+[BLOQUEADO] PATCH /lotes/147 (alterar lote) -> 403
+[BLOQUEADO] DELETE /sensores/5 (desativar sensor) -> 403
+
+== Depois das tentativas, B ainda usa o sensor normalmente
+[OK ] B lê o sensor e o nome NÃO foi alterado -> 200
+
+Resultado: TUDO CERTO
