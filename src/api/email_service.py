@@ -6,17 +6,21 @@ from email.message import EmailMessage
 log = logging.getLogger("email")
  
  
-def _enviar(para: str, assunto: str, corpo: str) -> None:
+def _enviar(para: str, assunto: str, corpo: str, anexo=None, propagar_erro: bool = False) -> None:
     if os.getenv("EMAIL_MODO_DEV", "false").lower() == "true":
-        print(f"\n[EMAIL_MODO_DEV] Para: {para}\nAssunto: {assunto}\n{corpo}\n")
+        extra = f"\n[anexo: {anexo[1]}]" if anexo else ""
+        print(f"\n[EMAIL_MODO_DEV] Para: {para}\nAssunto: {assunto}\n{corpo}{extra}\n")
         return
- 
+
     msg = EmailMessage()
     msg["From"] = os.environ.get("EMAIL_FROM", os.environ["SMTP_USER"])
     msg["To"] = para
     msg["Subject"] = assunto
     msg.set_content(corpo)
- 
+    if anexo:
+        dados, nome_arquivo = anexo
+        msg.add_attachment(dados, maintype="text", subtype="csv", filename=nome_arquivo)
+
     try:
         with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.getenv("SMTP_PORT", "587")), timeout=15) as s:
             s.starttls()
@@ -25,6 +29,8 @@ def _enviar(para: str, assunto: str, corpo: str) -> None:
     except Exception:
         # não logamos destinatário nem código; só o fato de ter falhado
         log.exception("Falha ao enviar e-mail de verificação")
+        if propagar_erro:
+            raise
  
  
 def enviar_codigo_login(para: str, nome: str, codigo: str, validade_min: int) -> None:
@@ -79,3 +85,12 @@ def enviar_aviso_senha_alterada(para: str, nome: str) -> None:
         "use a opção \"Esqueci minha senha\" agora e avise o administrador do sistema.\n"
     )
     _enviar(para, "Sua senha foi alterada", corpo)
+
+
+def enviar_relatorio(para: str, nome: str, titulo: str, csv_bytes: bytes, nome_arquivo: str) -> None:
+    corpo = (
+        f"Olá, {nome}.\n\n"
+        f"Segue em anexo o relatório solicitado: {titulo}.\n\n"
+        "Se você não pediu este relatório, avise o administrador do sistema.\n"
+    )
+    _enviar(para, f"Relatório: {titulo}", corpo, anexo=(csv_bytes, nome_arquivo), propagar_erro=True)
