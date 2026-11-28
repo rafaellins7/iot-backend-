@@ -1,22 +1,69 @@
-# Raiz - Backend
+<div align="center">
 
-Backend da plataforma **Raiz**, desenvolvida para o monitoramento agrícola por meio de sensores. A aplicação é composta por dois programas independentes que compartilham a mesma instância de banco de dados PostgreSQL:
+# 🌱 Raiz — Backend
 
-- **Serviço de ingestão de dados:** responsável pela leitura dos dados provenientes do canal ThingSpeak (ESP32/DHT11), validação das informações recebidas e persistência das leituras no banco de dados.
-- **API REST (FastAPI):** responsável por disponibilizar os dados e funcionalidades consumidos pelo dashboard, abrangendo sensores, lotes, leituras, alertas, faixas ideais, mercado, riscos, relatórios, usuários e auditoria.
+**Monitoramento climático e logístico em nuvem para exportadoras de frutas**
+Sensores IoT → validação → PostgreSQL → API segura → dashboard com alertas, previsões e pareceres de IA.
 
-> **Status do projeto: em desenvolvimento.** A API já implementa a maior parte das funcionalidades necessárias ao dashboard. Entretanto, ainda não possui mecanismos de autenticação ou controle de acesso, de modo que nenhuma rota exige autenticação atualmente (consulte [Autenticação e Segurança](#autenticação-e-segurança)). A estrutura da aplicação e o esquema do banco de dados ainda estão sujeitos a alterações. Este README documenta o estado atual da implementação.
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![IoT](https://img.shields.io/badge/ESP32-ThingSpeak-E7352C?logo=espressif&logoColor=white)
+![Gemini](https://img.shields.io/badge/IA-Gemini-8E75B2?logo=googlegemini&logoColor=white)
+![Testes](https://img.shields.io/badge/testes-pytest-0A9EDC?logo=pytest&logoColor=white)
+![Status](https://img.shields.io/badge/status-em%20desenvolvimento-orange)
 
-## Fluxo
+</div>
+
+---
+
+## Sobre o projeto
+
+O **Raiz** é a plataforma desenvolvida no Projeto Integrador do 4º módulo de Análise e Desenvolvimento de Sistemas (Senac) para acompanhar, em tempo real, as condições de lotes de frutas exportadas, do campo ao transporte. O foco é a região do Vale do São Francisco (Petrolina/Juazeiro).
+
+Este repositório é o **backend**. Ele reúne dois programas independentes que compartilham o mesmo banco PostgreSQL:
+
+| Programa | O que faz | Comando |
+| -------- | --------- | ------- |
+| **Serviço de ingestão + agendador** | Lê o ThingSpeak, valida e grava as leituras. Em segundo plano, gera risco climático, janela de colheita, irrigação, prejuízo, alertas preditivos e pareceres de IA. | `python -m src.main` |
+| **API REST (FastAPI)** | Autenticação, controle de acesso por perfil e todos os dados que o dashboard consome. | `uvicorn src.api.app:app --reload` |
+
+## Destaques
+
+-  **Ingestão robusta:** validação de faixa, deduplicação pelo banco e log de leituras rejeitadas (nenhum dado bruto se perde).
+-  **Ar e solo:** temperatura e umidade do ar (DHT11) e umidade do solo (ADC capacitivo), com mapeamento configurável dos *fields* do ThingSpeak.
+-  **Alertas em duas camadas:** alertas de faixa (trigger no banco) e **alertas preditivos** a partir do risco climático, com central de alertas e exportação em CSV.
+-  **IA aplicada:** pareceres automáticos por lote via LLM (Gemini), com cache por validade, modelos de reserva, *retry* e auditoria.
+-  **Previsões:** janela de colheita, risco climático, prejuízo estimado e recomendação de irrigação, com dados da Open-Meteo.
+-  **Segurança de verdade:** JWT + refresh, 2FA por **TOTP** (com códigos de recuperação) ou e-mail, bloqueio por tentativas, argon2id e proteção contra **IDOR/BOLA**.
+-  **3 perfis:** Administrador, Analista de Dados e Produtor/Exportador, cada um com seu escopo.
+-  **Tempo real:** stream SSE para o dashboard, com ticket de uso único.
+-  **Auditoria:** ações sensíveis registradas em `log_acesso`.
+-  **106 testes automatizados** (pytest), incluindo IDOR, permissões, TOTP e agendador.
+
+##  Arquitetura
 
 ```text
-ESP32 / DHT11
-      |
-  ThingSpeak ──► Serviço de ingestão (polling + validação) ──┐
-                                                             ▼
-  Open-Meteo ──► API FastAPI  ◄──────────────────────►  PostgreSQL
-                      |                                  (repo iot_db)
-                  Dashboard
+ ESP32-C3 + DHT11 + sensor de solo
+            │  MQTT / HTTP
+            ▼
+       ThingSpeak ──────────► Serviço de ingestão (python -m src.main)
+                               ├─ polling + validação + deduplicação
+                               ├─ notificações por e-mail
+                               └─ agendador (thread em segundo plano)
+                                   risco · janela · irrigação · prejuízo
+                                   alertas preditivos · parecer de IA
+                                          │
+   Open-Meteo ───────────────────────────►│
+   Gemini (LLM) ─────────────────────────►│
+                                          ▼
+                                    PostgreSQL  (repo iot_db)
+                                          ▲
+                                          │
+                              API FastAPI (JWT + RBAC + escopo por dono)
+                                          ▲
+                                          │  REST + SSE
+                                  Dashboard (React)
 ```
 
 ## Tecnologias
@@ -24,10 +71,173 @@ ESP32 / DHT11
 | Camada | Tecnologia |
 | ------ | ---------- |
 | API | Python, FastAPI, Uvicorn, Pydantic |
-| Banco | PostgreSQL, psycopg2-binary (SQL direto, sem ORM) |
-| Integrações | ThingSpeak REST API, Open-Meteo (previsão do tempo) |
-| Segurança | bcrypt |
-| Configuração | python-dotenv |
+| Banco | PostgreSQL, psycopg2 (SQL direto, sem ORM) |
+| Integrações | ThingSpeak, Open-Meteo, Google Gemini |
+| Segurança | argon2id (bcrypt legado aceito), PyJWT, pyotp (TOTP), cryptography (Fernet), qrcode |
+| E-mail | SMTP (ativação de conta, 2FA, recuperação de senha, alertas e relatórios) |
+| Testes | pytest, coleção Postman (`qa-api/`) |
+
+##  Perfis e permissões
+
+O Administrador passa por todas as regras. Os demais seguem a tabela:
+
+| Recurso | Produtor/Exportador | Analista de Dados |
+| ------- | :-----------------: | :---------------: |
+| Leituras, lotes, frutas, riscos, previsões, dashboard | 👁️ leitura, só dos próprios dados | 👁️ leitura |
+| Sensores, faixas ideais, alertas, catálogo, central de alertas | 👁️ leitura | ✏️ lê e edita (sem excluir) |
+| Pareceres | ✏️ consulta e gera | ✏️ consulta e gera |
+| Dados de mercado, recomendações, IA (`/ia/*`) | 👁️ somente Produtor | ❌ |
+| Resumos agregados, calibração, relatórios gerados | ❌ | ✅ |
+| Usuários, perfis, auditoria | ❌ | ❌ (só Administrador) |
+
+> Nos recursos acessados pelo Produtor, o servidor aplica **escopo por dono**: recurso de outro usuário responde `404`, igual a um recurso inexistente.
+
+## API
+
+Documentação interativa (Swagger) em **`/docs`** com a API rodando. Listagens aceitam `limit` (até 1000, padrão 100) e `offset`. Datas sem fuso são tratadas como UTC.
+
+| Grupo | Rotas principais |
+| ----- | ---------------- |
+| **Auth** | `POST /auth/login`, `/auth/ativar-conta`, `/auth/2fa/verify`, `/auth/2fa/reenviar`, `/auth/refresh`, `/auth/logout`, `GET /auth/me`, `POST /auth/trocar-senha`, `/auth/esqueci-senha`, `/auth/redefinir-senha` |
+| **2FA TOTP** | `GET /auth/2fa/totp/status`, `POST /iniciar` (QR code), `/confirmar`, `/recuperacao/regenerar`, `/desativar` |
+| **Usuários e perfis** | `/usuarios`, `/perfis` |
+| **Sensores e leituras** | `/sensores`, `/sensores/{id}/leituras`, `/leituras`, `/leituras/ultima`, `/leituras/estatisticas`, `/leituras-rejeitadas` |
+| **Lotes e catálogo** | `/lotes`, `/frutas`, `/config-parametros`, `/catalogo/*` (propriedades, safras, variedades, portos, perdas de risco) |
+| **Alertas** | `/alertas`, `/alertas-preditivos`, `/central-alertas` (+ `/exportar.csv`, `/curva`) |
+| **Previsões e risco** | `/previsoes/janela-colheita`, `/previsoes/risco-climatico/gerar`, `/previsoes/prejuizo/gerar`, `/previsoes/irrigacao`, `/riscos/prejuizo`, `/riscos/climatico`, `/clima/previsao` |
+| **IA** | `GET /ia/parecer`, `/ia/modelos`, `/recomendacoes`, `/pareceres` (gerar, editar, assinar) |
+| **Dashboard** | `/dashboard/resumo`, `POST /dashboard/stream/ticket` + `GET /dashboard/stream` (SSE), `/analista/*` |
+| **Relatórios** | `/relatorios`, `/relatorios/{id}/csv`, `/relatorios/{id}/enviar-email`, `/relatorios/saidas-faixa` |
+| **Operação** | `/calibracao/*`, `/notificacoes/*`, `/preferencias/*`, `/dados-mercado`, `/auditoria` |
+
+> Para testar rápido, importe `qa-api/raiz.postman_collection.json` e `qa-api/raiz.postman_environment.json` no Postman.
+
+## Ingestão de dados
+
+O serviço consulta a última leitura do canal a cada `POLL_INTERVAL_SECONDS` (padrão 20 s). Para cada leitura nova:
+
+1. **Valida** (`src/validacao.py`): `entry_id` inteiro, data ISO 8601, valores numéricos, finitos e dentro das faixas configuradas.
+2. **Grava** em `leitura_climatica` se válida (deduplicação por `ON CONFLICT (sensor, entry_id_thingspeak)`).
+3. **Rejeita** se inválida: guarda valores brutos e motivo em `leitura_rejeitada`.
+
+Por padrão: `field1` = temperatura, `field2` = umidade do ar, `field3` = umidade do solo. Tudo é ajustável via `TS_FIELD_*`.
+
+> Um serviço de ingestão atende **um canal e um sensor** (`SENSOR_ID`).
+
+## Agendador
+
+Rodando dentro do `python -m src.main`, o agendador executa tarefas em segundo plano, sem travar a coleta:
+
+| Tarefa | Intervalo padrão |
+| ------ | :--------------: |
+| Risco climático | 180 min |
+| Alertas preditivos | 180 min |
+| Janela de colheita | 360 min |
+| Irrigação | 360 min |
+| Prejuízo | 360 min |
+| Parecer de IA (só chama a IA quando o parecer do lote venceu) | 15 min |
+
+Falhas são registradas no log e tentadas de novo depois (`AGENDADOR_RETRY_MIN`). Para desligar tudo: `AGENDADOR_ATIVO=false`.
+
+## Como executar
+
+### Pré-requisitos
+
+- Python 3.11+
+- PostgreSQL com o banco já preparado (veja [Banco de dados](#-banco-de-dados))
+- Canal no ThingSpeak (ou use o `seed_demo` para dados de demonstração)
+- Chave da API do Gemini/groq (opcional, só para os recursos de IA)
+
+### 1. Clonar e instalar
+
+```bash
+git clone https://github.com/rafaellins7/iot-backend-.git
+cd iot-backend-
+
+python -m venv venv
+source venv/bin/activate        # Linux/Mac
+venv\Scripts\activate           # Windows
+
+pip install -r requirements.txt
+```
+
+### 2. Configurar o `.env`
+
+```bash
+cp .env.example .env
+```
+
+Gere as chaves de segurança:
+
+```bash
+# Chave Fernet que cifra o segredo TOTP
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Variáveis principais (a lista completa e comentada está no `.env.example`):
+
+| Grupo | Variáveis |
+| ----- | --------- |
+| **ThingSpeak** | `THINGSPEAK_CHANNEL_ID`, `THINGSPEAK_READ_API_KEY` (canal privado), `POLL_INTERVAL_SECONDS`, `SENSOR_ID`, `TS_FIELD_*` |
+| **Banco** | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` |
+| **Segurança** | `JWT_SECRET`, `EMAIL_OTP_KEY`, `TOTP_ENC_KEY`, `LOGIN_2FA_EMAIL`, `MISSION_CODE` |
+| **E-mail** | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM`, `EMAIL_MODO_DEV` |
+| **IA** | `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`, `LLM_MODELOS_RESERVA`, `PARECER_TTL_MIN` |
+| **Clima** | `CLIMA_LATITUDE`, `CLIMA_LONGITUDE`, `CLIMA_TIMEZONE`, `CLIMA_CACHE_SEGUNDOS` |
+| **Validação** | `TEMP_MIN_VALIDA`, `TEMP_MAX_VALIDA`, `UMIDADE_MIN_VALIDA`, `UMIDADE_MAX_VALIDA` |
+| **Agendador e notificações** | `AGENDADOR_*`, `NOTIFICACAO_*` |
+| **Web** | `CORS_ORIGINS` |
+
+> Em desenvolvimento, use `EMAIL_MODO_DEV=true` para não enviar e-mails de verdade.
+
+### 3. Subir os serviços
+
+```bash
+# Coleta + agendador (em um terminal)
+python -m src.main
+
+# API (em outro terminal)
+uvicorn src.api.app:app --reload
+```
+
+API em `http://127.0.0.1:8000` e documentação em `/docs`.
+
+### 4. Utilitários
+
+```bash
+python -m scripts.backfill_historico   # importa as últimas 100 leituras do canal
+python -m scripts.seed_demo            # dados de demonstração (precisa da API rodando e de um Administrador)
+python test_gemini.py                  # confere se a chave do Gemini está funcionando
+```
+
+## Banco de dados
+
+O banco fica em outro repositório: **[LorenaLira05/iot_db](https://github.com/LorenaLira05/iot_db)**. Este backend **não cria nem altera o esquema**: ele se conecta a um banco já preparado.
+
+Rode os scripts de lá na ordem: `schema.sql`, `restricoes.sql`, `seed.sql`, `triggers.sql`, `views.sql` (mais `auth.sql` e `implementação_ia.sql` para autenticação e previsões). Para as tabelas do 2FA TOTP, use também o `totp.sql` descrito em [`seguranca/README.md`](seguranca/README.md). Para o parecer de IA, existe a migração `scripts/migracao_parecer_geracao.sql` (aplicável com `python -m scripts.aplicar_migracao_parecer`).
+
+## Testes
+
+```bash
+pytest
+```
+
+- Os testes usam o banco definido em `TEST_DB_NAME` (padrão `raiz_teste`), para não sujar o banco principal.
+- Testes de integração precisam das variáveis `DB_*` configuradas.
+- Cobertura por área: IDOR e escopo, permissões por perfil, TOTP (unidade e integração), senha, agendador, alertas, cálculos de previsão, pareceres e stream.
+
+## Segurança
+
+A pasta [`seguranca/`](seguranca/) documenta os controles implementados no Projeto Integrador, com evidências de "antes e depois":
+
+| Controle | Ameaça | Como funciona |
+| -------- | ------ | ------------- |
+| **2FA por TOTP** | Senha vazada | RFC 6238, segredo cifrado com Fernet, códigos de recuperação de uso único, passo já usado não vale de novo, bloqueio após 5 falhas em 15 min |
+| **Proteção contra IDOR/BOLA** | Produtor trocando IDs na URL para ver dados de outro | Verificação de dono no servidor (`src/api/escopo.py`) usando o usuário do token; recurso alheio responde `404` |
+
+Outros pontos: senhas com **argon2id**, JWT de acesso curto (15 min) com refresh de 7 dias, consulta do usuário a cada requisição (desativar vale na hora), SQL parametrizado, CORS restrito, auditoria em `log_acesso` e log de bloqueios em `seguranca.log`.
+
+Veja também o [modelo de ameaças](seguranca/modelo-ameacas.md), o [uso de IA no projeto](seguranca/uso-de-ia.md) e as evidências em `seguranca/evidencias/`.
 
 ## Estrutura
 
@@ -36,192 +246,55 @@ iot-backend/
 ├── src/
 │   ├── api/
 │   │   ├── routers/            # um arquivo por recurso
-│   │   ├── app.py              # FastAPI, CORS e registro dos routers
-│   │   ├── auditoria.py        # registro de ações em log_acesso
-│   │   ├── deps.py             # conexão por requisição
-│   │   ├── filtros.py          # filtros de período e validação de sensor
-│   │   ├── schemas.py          # modelos Pydantic
-│   │   └── security.py         # hash e verificação de senha
-│   ├── config.py               # variáveis de ambiente
-│   ├── database.py             # conexão e gravação das leituras
+│   │   ├── services/           # IA (llm_client, pareceres), notificações, ativação
+│   │   ├── app.py              # FastAPI, CORS, perfis e registro dos routers
+│   │   ├── deps_auth.py        # usuário atual e controle por perfil
+│   │   ├── escopo.py           # proteção contra IDOR (escopo por dono)
+│   │   ├── security_auth.py    # JWT e hash de senha
+│   │   ├── totp.py / totp_db.py
+│   │   ├── auditoria.py        # registro em log_acesso
+│   │   └── schemas.py          # modelos Pydantic
+│   ├── tests/                  # suíte pytest
+│   ├── agendador.py            # tarefas preditivas em segundo plano
 │   ├── main.py                 # loop de ingestão
-│   ├── open_meteo_client.py    # cliente da Open-Meteo
-│   ├── thingspeak_client.py    # cliente do ThingSpeak
-│   └── validacao.py            # regras de validação das leituras
-├── scripts/
-│   └── backfill_historico.py   # importa leituras antigas do canal
+│   ├── database.py             # conexão e gravação das leituras
+│   ├── thingspeak_client.py
+│   ├── open_meteo_client.py
+│   └── validacao.py
+├── scripts/                    # backfill, seed de demo, migrações
+├── seguranca/                  # controles, ameaças, testes e evidências
+├── qa-api/                     # coleção e ambiente do Postman
 ├── .env.example
 └── requirements.txt
 ```
 
-## Ingestão de dados
+## 🗺️ Roadmap
 
-O serviço (`python -m src.main`) consulta a última leitura do canal a cada `POLL_INTERVAL_SECONDS` (padrão 20 s). Para cada leitura nova:
+- [x] API FastAPI organizada por routers
+- [x] Ingestão com validação, deduplicação e leituras rejeitadas
+- [x] Autenticação (JWT), 2FA por TOTP e e-mail, recuperação de senha
+- [x] Controle de acesso por perfil (RBAC) e proteção contra IDOR
+- [x] Alertas de faixa, alertas preditivos e central de alertas
+- [x] Pareceres de IA (Gemini) e previsões (colheita, risco, prejuízo, irrigação)
+- [x] Agendador em segundo plano
+- [x] Notificações por e-mail
+- [x] Stream em tempo real (SSE)
+- [x] Testes automatizados
+- [x] Deploy
+- [ ] Ingestão de vários sensores/canais
+- [ ] Rate limit por IP no `/auth/2fa/verify`
+- [ ] Cadastro de TOTP obrigatório no primeiro login
 
-1. **Valida** (`src/validacao.py`): `entry_id` inteiro, data em ISO 8601, temperatura e umidade presentes, numéricas, finitas e dentro das faixas `TEMP_*_VALIDA` e `UMIDADE_*_VALIDA`.
-2. **Grava** em `leitura_climatica` se for válida. A deduplicação é feita pelo banco (`ON CONFLICT (sensor, entry_id_thingspeak) DO NOTHING`).
-3. **Rejeita** se for inválida: guarda os valores brutos e o motivo em `leitura_rejeitada`, sem perder o dado.
+## Equipe
 
-Mapeamento do canal: `field1` = temperatura, `field2` = umidade. Todas as leituras vão para o sensor definido em `SENSOR_ID`, então um serviço de ingestão atende **um canal e um sensor**. Os alertas de faixa são criados pelo trigger do banco, não por este código.
+Projeto Integrador, Análise e Desenvolvimento de Sistemas, Faculdade Senac Pernambuco.
 
-O script `scripts/backfill_historico.py` faz o mesmo processamento com as últimas 100 leituras do canal e imprime quantas foram gravadas, duplicadas e rejeitadas.
+Lorena Lira · Maria Clara · Luiz Felipe · Victor Daniel · Ruan Gualberto · Ricardo Rafael · Caio Barreto
 
-## API
+## Créditos de dados
 
-Documentação interativa (Swagger) em `/docs` com a API rodando. Todas as listagens com `limit` aceitam até 1000 (padrão 100) e `offset`. Parâmetros `inicio` e `fim` são ISO 8601; sem fuso, são tratados como **UTC**.
+Previsão do tempo por [Open-Meteo](https://open-meteo.com/). Ao exibi-la na interface, cite a fonte (termos em <https://open-meteo.com/en/features#terms>).
 
-| Recurso | Rotas | Observações |
-| ------- | ----- | ----------- |
-| **Usuários** | `GET /usuarios` (`?status=`), `GET /usuarios/{id}`, `POST`, `PUT /usuarios/{id}`, `DELETE /usuarios/{id}`, `PUT /usuarios/{id}/senha` | `DELETE` só marca como `inativo`. Troca de senha exige a senha atual. |
-| **Perfis** | `GET /perfis` | |
-| **Sensores** | `GET /sensores` (`?ambiente=&id_lote=&status=`), `GET /sensores/{id}`, `POST`, `PUT /sensores/{id}`, `DELETE /sensores/{id}`, `GET /sensores/{id}/leituras?periodo=24h\|7d\|30d` | `DELETE` só marca como `inativo`. `channel_id` é único. O endpoint de leituras devolve médias por hora (24h e 7d) ou por dia (30d, dia civil em `America/Recife`) e indica se o ponto é `real` ou `simulado`. |
-| **Leituras** | `GET /leituras` (`?id_sensor=&inicio=&fim=`), `GET /leituras/ultima`, `GET /leituras/estatisticas`, `GET /leituras/{id}` | Estatísticas: total, primeira/última, mín., máx. e média. |
-| **Leituras rejeitadas** | `GET /leituras-rejeitadas` (`?id_sensor=&motivo=&inicio=&fim=`), `GET /leituras-rejeitadas/{id}` | |
-| **Lotes** | `GET /lotes` (`?status=&id_fruta=`), `GET /lotes/{id}`, `POST`, `PATCH /lotes/{id}` | Inclui a `etapa` do lote (campo, armazenamento ou transporte). |
-| **Frutas** | `GET /frutas`, `GET /frutas/{id}` | |
-| **Faixas ideais** | `GET /config-parametros` (`?id_fruta=&etapa=`), `GET /{id}`, `POST`, `PUT /{id}` | Uma faixa por fruta e etapa; exige mín. < máx. |
-| **Alertas** | `GET /alertas` (`?status=&nivel=&id_sensor=&id_lote=`), `GET /alertas/{id}`, `PATCH /alertas/{id}/status` | Datas em ISO 8601 com `Z`. |
-| **Dados de mercado** | `GET /dados-mercado` (`?id_fruta=&inicio=&fim=`), `GET /{id}`, `POST`, `PATCH /{id}` | |
-| **Dashboard** | `GET /dashboard/resumo` | Cartões: sensores ativos (reais e simulados), lotes monitorados, alertas abertos, condição geral, % das leituras na faixa nas últimas 24 h, médias do ar e VPD, fluxo dos lotes por etapa. |
-| **Relatórios** | `GET /relatorios/saidas-faixa` (`?agrupamento=dia\|semana\|mes&id_lote=&id_sensor=&inicio=&fim=`) | Leituras fora da faixa ideal por período. |
-| **Riscos** | `GET /riscos/prejuizo`, `GET /riscos/climatico` (`?id_lote=&nivel=&limite=`) | Sem `id_lote`: última previsão de cada lote. Com `id_lote`: histórico. |
-| **Clima** | `GET /clima/previsao` (`?dias=1-7&latitude=&longitude=`) | Previsão da Open-Meteo, com cache em memória. |
-| **Auditoria** | `GET /auditoria` (`?id_usuario=&acao=&resultado=&inicio=&fim=`), `GET /auditoria/{id}` | |
-
-**Auditoria:** criar/editar/desativar usuários e sensores, criar/editar lotes, faixas ideais e dados de mercado, e trocar senha gravam em `log_acesso` (ação, IP, resultado de sucesso ou falha). Como ainda não há login, o usuário só é registrado na troca de senha.
-
-**Dados da Open-Meteo:** ao exibir a previsão na interface, cite a Open-Meteo (termos de uso em <https://open-meteo.com/en/features#terms>).
-
-## Autenticação e Segurança
-
-Já implementado:
-
-* Senhas com hash **bcrypt**; tamanho de 8 a 72 caracteres e validação de e-mail;
-* E-mail único (sem diferenciar maiúsculas) e desativação em vez de exclusão de usuários e sensores;
-* Consultas SQL parametrizadas e campos editáveis restritos a uma lista fixa;
-* Registro de auditoria que nunca derruba a requisição se falhar;
-* CORS restrito às origens de `CORS_ORIGINS`.
-
-Ainda **não** implementado: login com token, controle de acesso por perfil (RBAC) e proteção das rotas. **Hoje qualquer cliente que alcance a API pode ler e alterar dados**, incluindo usuários. Não exponha a API publicamente até isso existir.
-
-Segredos (`.env`, chaves, senhas) não devem ser versionados.
-
-## Banco de Dados
-
-O banco fica em outro repositório: <https://github.com/LorenaLira05/iot_db>. Este backend **não cria nem altera o banco**: ele se conecta a um banco já preparado com os scripts de lá.
-
-Rode, na ordem: `schema.sql`, `restricoes.sql`, `seed.sql`, `triggers.sql`, `views.sql`. Para os endpoints de **riscos** rode também `implementação_ia.sql` (tabelas de modelos e previsões).
-
-O código usa:
-
-| Objeto | Usado por |
-| ------ | --------- |
-| `leitura_climatica`, `leitura_rejeitada`, `sensor` | ingestão, sensores, leituras |
-| `usuario`, `perfil`, `log_acesso` | usuários, perfis, auditoria |
-| `lote`, `fruta`, `config_parametro`, `dados_mercado` | lotes, frutas, faixas, mercado |
-| `alerta` | alertas (criados pelo trigger `trg_alerta_faixa`) |
-| `previsao_prejuizo`, `risco_climatico`, `ia_modelo` | riscos |
-| `fn_etapa_lote()`, `vw_lote_saude` | lotes, dashboard, relatórios |
-
-O `seed.sql` não cadastra previsões de IA; sem esses dados, `/riscos/*` retorna listas vazias. Se o esquema do banco mudar, este backend precisará acompanhar.
-
-## Como Executar:
-
-### 1. Clonar o repositório
-
-```bash
-git clone https://github.com/rafaellins7/iot-backend-.git
-cd iot-backend-
-```
-
-### 2. Criar ambiente virtual
-
-```bash
-python -m venv venv
-source venv/bin/activate      # Linux/Mac
-venv\Scripts\activate         # Windows
-```
-
-### 3. Instalar dependências
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configurar o `.env`
-
-Copie `.env.example` para `.env` e preencha:
-
-| Variável | Descrição | Padrão |
-| -------- | --------- | ------ |
-| `THINGSPEAK_CHANNEL_ID` | ID do canal | — |
-| `THINGSPEAK_READ_API_KEY` | Chave de leitura (só para canal privado) | vazio |
-| `POLL_INTERVAL_SECONDS` | Intervalo da coleta, em segundos | `20` |
-| `SENSOR_ID` | `id_sensor` que recebe as leituras do canal | `1` |
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Conexão com o PostgreSQL | — |
-| `CLIMA_LATITUDE`, `CLIMA_LONGITUDE` | Coordenadas padrão de `/clima/previsao` (sem elas a rota responde 503, a menos que a requisição envie as coordenadas) | — |
-| `CLIMA_TIMEZONE` | Fuso usado na previsão e na agregação diária | `America/Recife` |
-| `CLIMA_CACHE_SEGUNDOS` | Validade do cache da previsão | `600` |
-| `CORS_ORIGINS` | Origens liberadas, separadas por vírgula | `localhost`/`127.0.0.1` nas portas 5173 e 5174 |
-| `TEMP_MIN_VALIDA`, `TEMP_MAX_VALIDA` | Faixa aceita de temperatura (°C) | `-40` e `80` |
-| `UMIDADE_MIN_VALIDA`, `UMIDADE_MAX_VALIDA` | Faixa aceita de umidade (%) | `0` e `100` |
-
-### 5. Preparar o banco
-
-Veja [Banco de Dados](#banco-de-dados). Depois, use os dados de conexão no `.env`.
-
-### 6. Executar
-
-**Coleta contínua** (grava toda leitura nova do ThingSpeak):
-
-```bash
-python -m src.main
-```
-
-**Importar histórico** (últimas 100 leituras do canal):
-
-```bash
-python -m scripts.backfill_historico
-```
-
-**API:**
-
-```bash
-uvicorn src.api.app:app --reload
-```
-
-Disponível em `http://127.0.0.1:8000`, com a documentação em `/docs`. A coleta e a API são processos independentes: rode os dois para ter dados novos chegando enquanto o dashboard está aberto.
-
-## Status do Projeto
-
-### Implementado
-
-* [x] API FastAPI organizada por routers
-* [x] Ingestão do ThingSpeak com validação, deduplicação e log de leituras rejeitadas
-* [x] Importação de histórico
-* [x] Usuários e perfis, com bcrypt e desativação lógica
-* [x] Sensores (ar e solo), lotes, frutas e faixas ideais
-* [x] Consulta de leituras, estatísticas e séries agregadas por sensor
-* [x] Alertas (consulta e atualização de status)
-* [x] Dashboard, relatório de saídas de faixa e dados de mercado
-* [x] Riscos (prejuízo e climático)
-* [x] Previsão do tempo (Open-Meteo)
-* [x] Auditoria de ações
-
-### Em desenvolvimento / A fazer
-
-* [ ] Login e autenticação 2f
-* [ ] Controle de acesso por perfil (RBAC)
-* [ ] Proteção das rotas existentes
-* [ ] Ingestão de vários sensores/canais e dos campos de solo
-* [ ] Endpoints para gerar previsões (hoje a API só consulta as já gravadas)
-* [ ] Recuperação de senha
-* [ ] Testes automatizados
-* [ ] Implementação de IA
-* [ ] Envio de alertas pelo Whatsapp/Telegram
-* [ ] Logs estruturados em vez de `print`
-* [ ] Deploy
-
-## Licença
+## 📄 Licença
 
 Projeto acadêmico.
