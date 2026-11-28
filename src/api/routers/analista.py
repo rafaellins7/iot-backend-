@@ -109,3 +109,70 @@ def resumo_alertas(conn=Depends(get_conn)):
             for n in niveis
         ],
     }
+
+
+@router.get("/rede/historico")
+def historico_rede_pdr(horas: int = 24, conn=Depends(get_conn)):
+    """Série horária real de PDR (Packet Delivery Ratio) nas últimas N horas."""
+    horas = max(1, min(72, int(horas)))
+    intervalo_s = max(1, int(getattr(config, "ESP32_INTERVALO_ENVIO_S", None) or config.POLL_INTERVAL_SECONDS or 20))
+    esperadas_hora = max(1, int(3600 / intervalo_s))
+
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            f"""
+            WITH horas_ar AS (
+                SELECT date_trunc('hour', data_hora) AS hora_utc,
+                       COUNT(*)::int AS gravadas
+                  FROM leitura_climatica
+                 WHERE lower(COALESCE(origem, '')) LIKE 'thingspeak%%'
+                   AND data_hora >= date_trunc('hour', {AGORA_UTC}) - make_interval(hours => %s)
+                 GROUP BY 1
+            ),
+            horas_rej AS (
+                SELECT date_trunc('hour', data_rejeicao) AS hora_utc,
+                       COUNT(*)::int AS rejeitadas
+                  FROM leitura_rejeitada
+                 WHERE lower(COALESCE(origem, '')) LIKE 'thingspeak%%'
+                   AND data_rejeicao >= date_trunc('hour', {AGORA_UTC}) - make_interval(hours => %s)
+                 GROUP BY 1
+            )
+            SELECT COALESCE(a.hora_utc, r.hora_utc) AS hora_utc,
+                   COALESCE(a.gravadas, 0)::int AS gravadas,
+                   COALESCE(r.rejeitadas, 0)::int AS rejeitadas,
+                   EXTRACT(EPOCH FROM ({AGORA_UTC} - COALESCE(a.hora_utc, r.hora_utc)))::float AS seg_decorridos
+              FROM horas_ar a
+              FULL OUTER JOIN horas_rej r ON r.hora_utc = a.hora_utc
+             ORDER BY 1 ASC
+            """,
+            (horas, horas),
+        )
+        rows = cur.fetchall()
+
+    pontos = []
+    for r in rows:
+        grav = int(r["gravadas"])
+        rej = int(r["rejeitadas"])
+        seg = max(float(intervalo_s), min(3600.0, float(r["seg_decorridos"] or 3600.0)))
+        esp = max(1, int(seg / intervalo_s))
+        total_rec = grav + rej
+        denom = max(esp, total_rec)
+        pdr = round(min(100.0, (grav / denom) * 100.0), 1) if denom > 0 else 0.0
+        dt = r["hora_utc"]
+        instante_iso = dt.isoformat() + "Z" if dt else None
+        pontos.append({
+            "instante": instante_iso,
+            "hora": instante_iso,
+            "gravadas": grav,
+            "rejeitadas": rej,
+            "esperadas": esp,
+            "pdr_pct": pdr,
+            "rssi_dbm": None,
+        })
+
+    return {
+        "horas": horas,
+        "intervalo_s": intervalo_s,
+        "esperadas_por_hora": esperadas_hora,
+        "pontos": pontos,
+    }
